@@ -1,0 +1,10 @@
+prefix=/usr/local
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/lib
+includedir=\${prefix}/include
+
+Name: xeve
+Description: MPEG-5 EVC (Essential Video Coding) encoder
+Version: 1.0
+Libs: -L\${libdir} -lxeve
+Cflags: -I\${includedir}
