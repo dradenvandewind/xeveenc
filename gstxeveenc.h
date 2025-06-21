@@ -37,6 +37,8 @@ G_BEGIN_DECLS
 typedef struct _GstXeveEnc GstXeveEnc;
 typedef struct _GstXeveEncClass GstXeveEncClass;
 
+typedef struct _GstXeveEncPrivate GstXeveEncPrivate;
+
 /**
  * GstXeveEnc:
  * @parent: Parent GstVideoEncoder object
@@ -56,6 +58,10 @@ typedef struct _GstXeveEncClass GstXeveEncClass;
  */
 struct _GstXeveEnc {
   GstVideoEncoder parent;
+  
+  /*< private >*/
+  GstXeveEncPrivate *priv;
+
   
   /*< private >*/
   XEVE xeve_handle;

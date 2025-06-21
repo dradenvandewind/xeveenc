@@ -29,6 +29,17 @@
 GST_DEBUG_CATEGORY_STATIC(gst_xeve_enc_debug);
 #define GST_CAT_DEFAULT gst_xeve_enc_debug
 
+#define GST_XEVE_ENC_GET_PRIVATE(obj) (G_TYPE_INSTANCE_GET_PRIVATE((obj), GST_TYPE_XEVE_ENC, GstXeveEncPrivate))
+
+struct _GstXeveEncPrivate {
+  XEVE xeve_handle;
+  XEVE_PARAM xeve_param;
+  XEVE_CDSC xeve_cdsc;
+  gboolean encoder_initialized;
+  GstVideoCodecState *input_state;
+};
+
+
 /* Properties */
 enum {
   PROP_0,
@@ -91,6 +102,10 @@ gst_xeve_enc_class_init(GstXeveEncClass *klass)
   GObjectClass *gobject_class = G_OBJECT_CLASS(klass);
   GstVideoEncoderClass *video_encoder_class = GST_VIDEO_ENCODER_CLASS(klass);
   GstElementClass *element_class = GST_ELEMENT_CLASS(klass);
+
+  //gobject_class->dispose = gst_xeve_enc_dispose;
+
+  g_type_class_add_private(klass, sizeof(GstXeveEncPrivate));
 
   GST_DEBUG_CATEGORY_INIT(gst_xeve_enc_debug, "xeveenc", 0, "XEVE Encoder");
 
@@ -160,6 +175,10 @@ gst_xeve_enc_class_init(GstXeveEncClass *klass)
 static void
 gst_xeve_enc_init(GstXeveEnc *self)
 {
+GstXeveEncPrivate *priv = GST_XEVE_ENC_GET_PRIVATE(self);
+  
+  self->priv = priv;
+
   /* Default values */
   self->bitrate = 2000;
   self->qp = 0;
@@ -170,10 +189,34 @@ gst_xeve_enc_init(GstXeveEnc *self)
   self->keyint_max = 250;
   self->annexb = TRUE;
   self->xeve_handle = NULL;
+  self->input_state = NULL;  // Initialize input_state to NULL
 
   /* Initialize XEVE params */
   xeve_param_default(&self->xeve_param);
+  priv->xeve_handle = NULL;
+  priv->input_state = NULL;
+  priv->encoder_initialized = FALSE;
 }
+/*
+static void
+gst_xeve_enc_dispose(GObject *object)
+{
+  GstXeveEnc *self = GST_XEVE_ENC(object);
+  GstXeveEncPrivate *priv = self->priv;
+
+  if (priv->input_state) {
+    gst_video_codec_state_unref(priv->input_state);
+    priv->input_state = NULL;
+  }
+
+  if (priv->xeve_handle) {
+    xeve_delete(priv->xeve_handle);
+    priv->xeve_handle = NULL;
+  }
+
+  G_OBJECT_CLASS(gst_xeve_enc_parent_class)->dispose(object);
+}
+*/
 
 /* Property setters/getters */
 static void
@@ -255,7 +298,7 @@ static gboolean
 gst_xeve_enc_start(GstVideoEncoder *encoder)
 {
   GstXeveEnc *self = GST_XEVE_ENC(encoder);
-  int err = 0;
+  //int err = 0;
 
   /* Apply encoder settings */
   self->xeve_param.profile = self->profile;
@@ -269,11 +312,13 @@ gst_xeve_enc_start(GstVideoEncoder *encoder)
   xeve_param_ppt(&self->xeve_param, self->profile, self->preset, self->tune);
 
   /* Initialize XEVE encoder */
+ /*
   self->xeve_handle = xeve_create(&self->xeve_cdsc, &err);
   if (!self->xeve_handle || err != XEVE_OK) {
     GST_ERROR_OBJECT(self, "Failed to initialize XEVE encoder (err=%d)", err);
     return FALSE;
   }
+    */
 
   return TRUE;
 }
@@ -289,6 +334,12 @@ gst_xeve_enc_stop(GstVideoEncoder *encoder)
     self->xeve_handle = NULL;
   }
 
+   if (self->input_state) {
+    gst_video_codec_state_unref(self->input_state);
+    self->input_state = NULL;
+  }
+
+
   return TRUE;
 }
 
@@ -298,6 +349,14 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
 {
   GstXeveEnc *self = GST_XEVE_ENC(encoder);
   GstVideoInfo *info = &state->info;
+  int err = 0;
+  /* Free previous input state if any */
+  if (self->input_state)
+    gst_video_codec_state_unref(self->input_state);
+
+  /* Store the input state */
+  self->input_state = gst_video_codec_state_ref(state);
+
 
   /* Configure XEVE for the input format */
   self->xeve_param.w = GST_VIDEO_INFO_WIDTH(info);
@@ -319,6 +378,19 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
     default:
       GST_ERROR_OBJECT(self, "Unsupported input format");
       return FALSE;
+  }
+
+    /* If encoder was already initialized, recreate it */
+  if (self->xeve_handle) {
+    xeve_delete(self->xeve_handle);
+    self->xeve_handle = NULL;
+  }
+
+  /* Initialize XEVE encoder */
+  self->xeve_handle = xeve_create(&self->xeve_cdsc, &err);
+  if (!self->xeve_handle || err != XEVE_OK) {
+    GST_ERROR_OBJECT(self, "Failed to initialize XEVE encoder (err=%d)", err);
+    return FALSE;
   }
 
   return TRUE;
