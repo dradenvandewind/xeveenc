@@ -71,6 +71,10 @@ struct _GstXeveEnc {
   gboolean closed_gop;
   gint keyint_max;
   gboolean annexb;
+
+  /* Internal state */
+  gboolean encoder_initialized;
+  GstVideoCodecState *input_state;
 };
 
 struct _GstXeveEncClass {

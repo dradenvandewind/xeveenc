@@ -329,11 +329,11 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
 static GstFlowReturn
 gst_xeve_enc_handle_frame(GstVideoEncoder *encoder, GstVideoCodecFrame *frame)
 {
-  GstXeveEnc *self = GST_XEVE_ENC(encoder);
+//  GstXeveEnc *self = GST_XEVE_ENC(encoder);
 //   GstVideoCodecState *input_state = gst_video_codec_frame_get_input_state(frame);
 //   GstVideoInfo *info = &input_state->info;
-  GstVideoCodecState *input_state = frame->input_state;
-  GstVideoInfo *info = &input_state->info;
+ GstXeveEnc *self = GST_XEVE_ENC(encoder);
+  GstVideoInfo *info = &self->input_state->info;
 
   XEVE_IMGB img_buf = {0};
   XEVE_BITB bit_buf = {0};
