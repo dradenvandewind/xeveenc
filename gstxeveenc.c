@@ -252,6 +252,16 @@ gst_xeve_enc_start(GstVideoEncoder *encoder)
 
   xeve_param_ppt(priv->xeve_param, self->profile, self->preset, self->tune);
 
+  g_print("XEVE params after ppt: w=%d h=%d profile=%d preset=%d tune=%d\n",
+        priv->xeve_param->w, priv->xeve_param->h, 
+        priv->xeve_param->profile, self->preset, self->tune);
+
+  if (priv->xeve_param->w < 16 || priv->xeve_param->h < 16) {
+    GST_ERROR_OBJECT(self, "Invalid dimensions: %dx%d", 
+                     priv->xeve_param->w, priv->xeve_param->h);
+    return FALSE;
+}
+
   return TRUE;
 }
 
