@@ -124,6 +124,23 @@ gst_xeve_enc_init(GstXeveEnc *self)
 {
   GstXeveEncPrivate *priv = GST_XEVE_ENC_GET_PRIVATE(self);
 
+  
+  GstVideoInfo *info;
+
+  self->width = info->width;
+  self->height = info->height;
+  self->fps_n = info->fps_n;
+  self->fps_d = info->fps_d;
+
+  g_print("width %d \n",self->width);
+  g_print("height %d \n",self->height);
+
+    
+  
+  
+
+  
+
   self->bitrate = 2000;
   self->qp = 0;
   self->profile = 0;
@@ -223,6 +240,8 @@ gst_xeve_enc_start(GstVideoEncoder *encoder)
     GST_ERROR_OBJECT(self, "XEVE param not initialized");
     return FALSE;
   }
+  priv->xeve_param->w = self->width;
+  priv->xeve_param->h = self->height;
 
   priv->xeve_param->profile = self->profile;
   priv->xeve_param->bitrate = self->bitrate;
@@ -278,6 +297,8 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
   priv->xeve_param->fps.num = GST_VIDEO_INFO_FPS_N(info);
   priv->xeve_param->fps.den = GST_VIDEO_INFO_FPS_D(info);
 
+  
+
   switch (GST_VIDEO_INFO_FORMAT(info)) {
     case GST_VIDEO_FORMAT_I420:
     case GST_VIDEO_FORMAT_NV12:
@@ -293,6 +314,21 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
     xeve_delete(priv->xeve_handle);
     priv->xeve_handle = NULL;
   }
+
+
+  #ifdef DEBUG 
+    g_print("File: %s | Function: %s | Line: %d\n", __FILE__, __func__, __LINE__);
+    g_print("width %d \n",priv->xeve_param->w);
+    g_print("height %d \n",priv->xeve_param->h);
+    g_print("fps num %d \n",priv->xeve_param->fps.num);
+    g_print("fps_den %d \n",priv->xeve_param->fps.den);
+
+    g_print("chromat format %d \n",priv->xeve_param->cs);
+
+    g_print("File: %s | Function: %s | Line: %d\n", __FILE__, __func__, __LINE__);
+
+  #endif 
+  
 
   priv->xeve_handle = xeve_create(priv->xeve_cdsc, &err);
   if (!priv->xeve_handle || err != XEVE_OK) {

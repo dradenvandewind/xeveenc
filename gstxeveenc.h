@@ -5,7 +5,7 @@
 #include <gst/video/video.h>
 #include <gst/video/gstvideoencoder.h>
 #include <xeve.h>
-
+#define DEBUG TRUE
 G_BEGIN_DECLS
 
 #define GST_TYPE_XEVE_ENC            (gst_xeve_enc_get_type())
@@ -15,6 +15,13 @@ struct _GstXeveEnc {
   GstVideoEncoder parent;
   
   /* Properties */
+
+  gint width;
+  gint height;
+  gint fps_n;
+  gint fps_d;
+
+
   gint bitrate;
   gint qp;
   gint profile;
