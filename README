@@ -1,0 +1,7 @@
+git clone https://github.com/dradenvandewind/xeveenc.git && \
+cd xeveenc && \
+meson builddir --prefix=/usr && \
+ninja -C builddir && \
+ninja -C builddir install && \
+ldconfig
+
