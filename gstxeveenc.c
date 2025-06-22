@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2023, Your Name
- * Contact: your-email@example.com
+ * Copyright (c) 2025, Le Blond Erwan
+ * Contact: erwanleblond@gmail.com
  */
 
 // Add these definitions at the top of gstxeveenc.c
@@ -15,8 +15,8 @@ GST_DEBUG_CATEGORY_STATIC(gst_xeve_enc_debug);
 
 typedef struct {
   XEVE xeve_handle;
-  XEVE_PARAM xeve_param;
-  XEVE_CDSC xeve_cdsc;
+  XEVE_PARAM *xeve_param;      // Pointer instead of direct structure
+  XEVE_CDSC *xeve_cdsc;        // Pointer instead of direct structure
   gboolean encoder_initialized;
   GstVideoCodecState *input_state;
 } GstXeveEncPrivate;
@@ -133,7 +133,11 @@ gst_xeve_enc_init(GstXeveEnc *self)
   self->keyint_max = 250;
   self->annexb = TRUE;
 
-  xeve_param_default(&priv->xeve_param);
+  // Allocation dynamique des structures XEVE
+  priv->xeve_param = g_malloc0(sizeof(XEVE_PARAM));
+  priv->xeve_cdsc = g_malloc0(sizeof(XEVE_CDSC));
+  
+  xeve_param_default(priv->xeve_param);
   priv->xeve_handle = NULL;
   priv->input_state = NULL;
   priv->encoder_initialized = FALSE;
@@ -195,6 +199,17 @@ gst_xeve_enc_dispose(GObject *object)
     priv->input_state = NULL;
   }
 
+  // Libération de la mémoire allouée dynamiquement
+  if (priv->xeve_param) {
+    g_free(priv->xeve_param);
+    priv->xeve_param = NULL;
+  }
+
+  if (priv->xeve_cdsc) {
+    g_free(priv->xeve_cdsc);
+    priv->xeve_cdsc = NULL;
+  }
+
   G_OBJECT_CLASS(gst_xeve_enc_parent_class)->dispose(object);
 }
 
@@ -204,14 +219,19 @@ gst_xeve_enc_start(GstVideoEncoder *encoder)
   GstXeveEnc *self = GST_XEVE_ENC(encoder);
   GstXeveEncPrivate *priv = GST_XEVE_ENC_GET_PRIVATE(self);
 
-  priv->xeve_param.profile = self->profile;
-  priv->xeve_param.bitrate = self->bitrate;
-  priv->xeve_param.qp = self->qp;
-  priv->xeve_param.closed_gop = self->closed_gop;
-  priv->xeve_param.keyint = self->keyint_max;
-  priv->xeve_param.use_annexb = self->annexb;
+  if (!priv->xeve_param) {
+    GST_ERROR_OBJECT(self, "XEVE param not initialized");
+    return FALSE;
+  }
 
-  xeve_param_ppt(&priv->xeve_param, self->profile, self->preset, self->tune);
+  priv->xeve_param->profile = self->profile;
+  priv->xeve_param->bitrate = self->bitrate;
+  priv->xeve_param->qp = self->qp;
+  priv->xeve_param->closed_gop = self->closed_gop;
+  priv->xeve_param->keyint = self->keyint_max;
+  priv->xeve_param->use_annexb = self->annexb;
+
+  xeve_param_ppt(priv->xeve_param, self->profile, self->preset, self->tune);
 
   return TRUE;
 }
@@ -243,21 +263,26 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
   GstVideoInfo *info = &state->info;
   int err = 0;
 
+  if (!priv->xeve_param || !priv->xeve_cdsc) {
+    GST_ERROR_OBJECT(self, "XEVE structures not initialized");
+    return FALSE;
+  }
+
   if (priv->input_state)
     gst_video_codec_state_unref(priv->input_state);
 
   priv->input_state = gst_video_codec_state_ref(state);
 
-  priv->xeve_param.w = GST_VIDEO_INFO_WIDTH(info);
-  priv->xeve_param.h = GST_VIDEO_INFO_HEIGHT(info);
-  priv->xeve_param.fps.num = GST_VIDEO_INFO_FPS_N(info);
-  priv->xeve_param.fps.den = GST_VIDEO_INFO_FPS_D(info);
+  priv->xeve_param->w = GST_VIDEO_INFO_WIDTH(info);
+  priv->xeve_param->h = GST_VIDEO_INFO_HEIGHT(info);
+  priv->xeve_param->fps.num = GST_VIDEO_INFO_FPS_N(info);
+  priv->xeve_param->fps.den = GST_VIDEO_INFO_FPS_D(info);
 
   switch (GST_VIDEO_INFO_FORMAT(info)) {
     case GST_VIDEO_FORMAT_I420:
     case GST_VIDEO_FORMAT_NV12:
     case GST_VIDEO_FORMAT_YV12:
-      priv->xeve_param.cs = XEVE_CS_YCBCR420;
+      priv->xeve_param->cs = XEVE_CS_YCBCR420;
       break;
     default:
       GST_ERROR_OBJECT(self, "Unsupported input format");
@@ -269,7 +294,7 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
     priv->xeve_handle = NULL;
   }
 
-  priv->xeve_handle = xeve_create(&priv->xeve_cdsc, &err);
+  priv->xeve_handle = xeve_create(priv->xeve_cdsc, &err);
   if (!priv->xeve_handle || err != XEVE_OK) {
     GST_ERROR_OBJECT(self, "Failed to initialize XEVE encoder (err=%d)", err);
     return FALSE;
@@ -292,12 +317,17 @@ gst_xeve_enc_handle_frame(GstVideoEncoder *encoder, GstVideoCodecFrame *frame)
   GstFlowReturn ret = GST_FLOW_ERROR;
   int err;
 
+  if (!priv->xeve_param) {
+    GST_ERROR_OBJECT(self, "XEVE param not initialized");
+    goto done;
+  }
+
   if (!gst_buffer_map(frame->input_buffer, &in_map, GST_MAP_READ)) {
     GST_ERROR_OBJECT(self, "Failed to map input buffer");
     goto done;
   }
 
-  img_buf.cs = priv->xeve_param.cs;
+  img_buf.cs = priv->xeve_param->cs;
   img_buf.w[0] = GST_VIDEO_INFO_WIDTH(info);
   img_buf.h[0] = GST_VIDEO_INFO_HEIGHT(info);
   img_buf.a[0] = in_map.data;
@@ -308,7 +338,7 @@ gst_xeve_enc_handle_frame(GstVideoEncoder *encoder, GstVideoCodecFrame *frame)
     goto unmap_input;
   }
 
-  out_buf = gst_buffer_new_and_alloc(priv->xeve_param.w * priv->xeve_param.h * 3 / 2);
+  out_buf = gst_buffer_new_and_alloc(priv->xeve_param->w * priv->xeve_param->h * 3 / 2);
   if (!out_buf) {
     GST_ERROR_OBJECT(self, "Failed to allocate output buffer");
     goto unmap_input;

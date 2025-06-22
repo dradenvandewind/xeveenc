@@ -1,7 +1,28 @@
+git clone https://github.com/mpeg5/xeve && \
+cd xeve && \
+mkdir build && \
+cd build && \
+cmake .. && \
+make && \
+make install && \
+ldconfig
+
+
 git clone https://github.com/dradenvandewind/xeveenc.git && \
 cd xeveenc && \
 meson builddir --prefix=/usr && \
 ninja -C builddir && \
 ninja -C builddir install && \
 ldconfig
+
+
+
+ nm -D /usr/lib/x86_64-linux-gnu/gstreamer-1.0/gstxeveenc.so | grep gst_plugin_
+
+GST_DEBUG=GST_PLUGIN_LOADING:5,xeveenc:5 gst-inspect-1.0 xeveenc 2>&1 | head -50
+
+
+try 
+gst-launch-1.0 videotestsrc num-buffers=10 ! xeveenc ! fakesink
+
 
