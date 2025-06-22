@@ -110,7 +110,7 @@ gst_xeve_enc_class_init(GstXeveEncClass *klass)
       "XEVE Video Encoder",
       "Codec/Encoder/Video",
       "Encode video streams using XEVE",
-      "Your Name <your-email@example.com>");
+      "Erwan Le Blond <erwanleblond@gmail.com>")
 
   video_encoder_class->start = gst_xeve_enc_start;
   video_encoder_class->stop = gst_xeve_enc_stop;
