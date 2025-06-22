@@ -80,6 +80,7 @@ static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
 static void
 gst_xeve_enc_class_init(GstXeveEncClass *klass)
 {
+  g_print("Private struct size: %zu\n", sizeof(GstXeveEncPrivate));
   GObjectClass *gobject_class = G_OBJECT_CLASS(klass);
   GstVideoEncoderClass *video_encoder_class = GST_VIDEO_ENCODER_CLASS(klass);
   GstElementClass *element_class = GST_ELEMENT_CLASS(klass);
@@ -110,7 +111,7 @@ gst_xeve_enc_class_init(GstXeveEncClass *klass)
       "XEVE Video Encoder",
       "Codec/Encoder/Video",
       "Encode video streams using XEVE",
-      "Erwan Le Blond <erwanleblond@gmail.com>")
+      "Erwan Le Blond <erwanleblond@gmail.com>");
 
   video_encoder_class->start = gst_xeve_enc_start;
   video_encoder_class->stop = gst_xeve_enc_stop;
