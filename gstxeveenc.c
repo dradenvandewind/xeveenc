@@ -123,23 +123,12 @@ static void
 gst_xeve_enc_init(GstXeveEnc *self)
 {
   GstXeveEncPrivate *priv = GST_XEVE_ENC_GET_PRIVATE(self);
+  int ret;
 
-  
-  GstVideoInfo *info;
-
-  self->width = info->width;
-  self->height = info->height;
-  self->fps_n = info->fps_n;
-  self->fps_d = info->fps_d;
-
-  g_print("width %d \n",self->width);
-  g_print("height %d \n",self->height);
-
-    
-  
-  
-
-  
+self->width = 0;   
+  self->height = 0;    
+  self->fps_n = 0;     
+  self->fps_d = 1;
 
   self->bitrate = 2000;
   self->qp = 0;
@@ -151,10 +140,23 @@ gst_xeve_enc_init(GstXeveEnc *self)
   self->annexb = TRUE;
 
   // Allocation dynamique des structures XEVE
-  priv->xeve_param = g_malloc0(sizeof(XEVE_PARAM));
+  //priv->xeve_param = g_malloc0(sizeof(XEVE_PARAM));
   priv->xeve_cdsc = g_malloc0(sizeof(XEVE_CDSC));
+
+  //memset(&priv->xeve_cdsc, 0, sizeof(XEVE_CDSC));
+  priv->xeve_param = &priv->xeve_cdsc->param;
+
   
-  xeve_param_default(priv->xeve_param);
+  //xeve_param_default(priv->xeve_param);
+
+  ret = xeve_param_default(priv->xeve_param);
+  if (XEVE_FAILED(ret))
+  {
+        g_print("cannot set default parameter\n");
+        ret = -1; 
+        //goto ERR;
+  }
+
   priv->xeve_handle = NULL;
   priv->input_state = NULL;
   priv->encoder_initialized = FALSE;
@@ -240,27 +242,6 @@ gst_xeve_enc_start(GstVideoEncoder *encoder)
     GST_ERROR_OBJECT(self, "XEVE param not initialized");
     return FALSE;
   }
-  priv->xeve_param->w = self->width;
-  priv->xeve_param->h = self->height;
-
-  priv->xeve_param->profile = self->profile;
-  priv->xeve_param->bitrate = self->bitrate;
-  priv->xeve_param->qp = self->qp;
-  priv->xeve_param->closed_gop = self->closed_gop;
-  priv->xeve_param->keyint = self->keyint_max;
-  priv->xeve_param->use_annexb = self->annexb;
-
-  xeve_param_ppt(priv->xeve_param, self->profile, self->preset, self->tune);
-
-  g_print("XEVE params after ppt: w=%d h=%d profile=%d preset=%d tune=%d\n",
-        priv->xeve_param->w, priv->xeve_param->h, 
-        priv->xeve_param->profile, self->preset, self->tune);
-
-  if (priv->xeve_param->w < 16 || priv->xeve_param->h < 16) {
-    GST_ERROR_OBJECT(self, "Invalid dimensions: %dx%d", 
-                     priv->xeve_param->w, priv->xeve_param->h);
-    return FALSE;
-}
 
   return TRUE;
 }
@@ -280,6 +261,8 @@ gst_xeve_enc_stop(GstVideoEncoder *encoder)
     gst_video_codec_state_unref(priv->input_state);
     priv->input_state = NULL;
   }
+
+  GST_INFO_OBJECT(self, "Encoder XEVE started");
 
   return TRUE;
 }
@@ -307,6 +290,14 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
   priv->xeve_param->fps.num = GST_VIDEO_INFO_FPS_N(info);
   priv->xeve_param->fps.den = GST_VIDEO_INFO_FPS_D(info);
 
+  priv->xeve_param->w = self->width;
+  priv->xeve_param->h = self->height;
+  priv->xeve_param->fps.num = self->fps_n;
+  priv->xeve_param->fps.den = self->fps_d;
+
+  GST_INFO_OBJECT(self, "Format  : %dx%d @ %d/%d fps",
+                  self->width, self->height, self->fps_n, self->fps_d);
+
   
 
   switch (GST_VIDEO_INFO_FORMAT(info)) {
@@ -324,6 +315,9 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
     xeve_delete(priv->xeve_handle);
     priv->xeve_handle = NULL;
   }
+
+  xeve_param_ppt(priv->xeve_param, self->profile, self->preset, self->tune);
+
 
 
   #ifdef DEBUG 
