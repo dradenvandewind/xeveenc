@@ -21,8 +21,95 @@ ldconfig
 
 GST_DEBUG=GST_PLUGIN_LOADING:5,xeveenc:5 gst-inspect-1.0 xeveenc 2>&1 | head -50
 
+gst-inspect-1.0 xeveenc
+Private struct size: 40
+Factory Details:
+  Rank                     primary (256)
+  Long-name                XEVE Video Encoder
+  Klass                    Codec/Encoder/Video
+  Description              Encode video streams using XEVE
+  Author                   Erwan Le Blond <erwanleblond@gmail.com>
+
+Plugin Details:
+  Name                     xeveenc
+  Description              XEVE Video Encoder
+  Filename                 /usr/lib/x86_64-linux-gnu/gstreamer-1.0/gstxeveenc.so
+  Version                  1.0.0
+  License                  LGPL
+  Source module            gstxeve
+  Binary package           GStreamer
+  Origin URL               https://example.com
+
+GObject
+ +----GInitiallyUnowned
+       +----GstObject
+             +----GstElement
+                   +----GstVideoEncoder
+                         +----GstXeveEnc
+
+Implemented Interfaces:
+  GstPreset
+
+Element Flags:
+
+Pad Templates:
+  SINK template: 'sink'
+    Availability: Always
+    Capabilities:
+      video/x-raw
+                 format: { (string)I420, (string)NV12, (string)YV12 }
+                  width: [ 16, 8192 ]
+                 height: [ 16, 4320 ]
+              framerate: [ 0/1, 300/1 ]
+  
+  SRC template: 'src'
+    Availability: Always
+    Capabilities:
+      video/x-xeve
+                  width: [ 16, 8192 ]
+                 height: [ 16, 4320 ]
+              framerate: [ 0/1, 300/1 ]
+          stream-format: byte-stream
+              alignment: au
+
+Element has no clocking capabilities.
+Element has no URI handling capabilities.
+
+Pads:
+  SINK: 'sink'
+    Pad Template: 'sink'
+  SRC: 'src'
+    Pad Template: 'src'
+
+Element Properties:
+
+  bitrate             : Target bitrate in kbps
+                        flags: readable, writable
+                        Integer. Range: 1 - 200000 Default: 2000 
+  
+  min-force-key-unit-interval: Minimum interval between force-keyunit requests in nanoseconds
+                        flags: readable, writable
+                        Unsigned Integer64. Range: 0 - 18446744073709551615 Default: 0 
+  
+  name                : The name of the object
+                        flags: readable, writable
+                        String. Default: "xeveenc0"
+  
+  parent              : The parent of the object
+                        flags: readable, writable
+                        Object of type "GstObject"
+  
+  qos                 : Handle Quality-of-Service events from downstream
+                        flags: readable, writable
+                        Boolean. Default: false
+  
+  qp                  : Quantization Parameter (0 = auto)
+                        flags: readable, writable
+                        Integer. Range: 0 - 51 Default: 0 
+
+
 
 try 
-gst-launch-1.0 videotestsrc num-buffers=10 ! xeveenc ! fakesink
+gst-launch-1.0 videotestsrc ! video/x-raw,width=320,height=240,framerate=30/1 ! xeveenc ! fakesink
 
 
