@@ -126,24 +126,12 @@ gst_xeve_enc_init(GstXeveEnc *self)
 
   GST_DEBUG_OBJECT(self, "init called");
 
-  // SUPPRIMER ce code problématique :
-  /*
-  GstVideoInfo *info;  // Cette ligne cause l'erreur
-  self->width = info->width;   
-  self->height = info->height;
-  self->fps_n = info->fps_n;
-  self->fps_d = info->fps_d;
-  g_print("width %d \n",self->width);
-  g_print("height %d \n",self->height);
-  */
-
-  // Initialiser avec des valeurs par défaut
-  self->width = 0;     // Sera défini dans set_format()
-  self->height = 0;    // Sera défini dans set_format()
-  self->fps_n = 25;    // Valeur par défaut non nulle
+  self->width = 0;    
+  self->height = 0;    
+  self->fps_n = 25;   
   self->fps_d = 1;
 
-  // Paramètres par défaut de l'encodeur
+  // Default encoder settings
   self->bitrate = 2000;
   self->qp = 0;
   self->profile = 0;
@@ -153,14 +141,14 @@ gst_xeve_enc_init(GstXeveEnc *self)
   self->keyint_max = 250;
   self->annexb = TRUE;
 
-  // Initialiser les pointeurs à NULL avant allocation
+  // Initialize pointers to NULL before allocation
   priv->xeve_param = NULL;
   priv->xeve_cdsc = NULL;
   priv->xeve_handle = NULL;
   priv->input_state = NULL;
   priv->encoder_initialized = FALSE;
 
-  // Allocation sécurisée
+  // Secure allocation  
   priv->xeve_param = g_malloc0(sizeof(XEVE_PARAM));
   priv->xeve_cdsc = g_malloc0(sizeof(XEVE_CDSC));
   
@@ -218,19 +206,19 @@ gst_xeve_enc_dispose(GObject *object)
 
   GST_DEBUG_OBJECT(self, "dispose called");
 
-  // Nettoyer l'encodeur XEVE
+  // Clean the XEVE encoder  
   if (priv->xeve_handle) {
     xeve_delete(priv->xeve_handle);
     priv->xeve_handle = NULL;
   }
 
-  // Libérer l'état d'entrée
+  // Release the input state  
   if (priv->input_state) {
     gst_video_codec_state_unref(priv->input_state);
     priv->input_state = NULL;
   }
 
-  // Vérifier que les pointeurs ne sont pas NULL avant libération
+  // Check that pointers are not NULL before release  
   if (priv->xeve_param) {
     g_free(priv->xeve_param);
     priv->xeve_param = NULL;
@@ -259,19 +247,8 @@ gst_xeve_enc_start(GstVideoEncoder *encoder)
     return FALSE;
   }
 
-  // SUPPRIMER ces lignes qui utilisent self->width/height non initialisés :
-  /*
-  priv->xeve_param->w = self->width;
-  priv->xeve_param->h = self->height;
-  ... autres paramètres ...
-  if (priv->xeve_param->w < 16 || priv->xeve_param->h < 16) {
-    GST_ERROR_OBJECT(self, "Invalid dimensions: %dx%d", 
-                     priv->xeve_param->w, priv->xeve_param->h);
-    return FALSE;
-  }
-  */
 
-  // Réinitialiser l'état
+  // Reset status  
   priv->encoder_initialized = FALSE;
   
   GST_INFO_OBJECT(self, "XEVE encoder started - waiting for format negotiation");
@@ -318,7 +295,7 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
 
   priv->input_state = gst_video_codec_state_ref(state);
 
-  // Extraire correctement les informations depuis GstVideoInfo
+  // Correctly extract information from GstVideoInfo  
   gint width = GST_VIDEO_INFO_WIDTH(info);
   gint height = GST_VIDEO_INFO_HEIGHT(info);
   gint fps_n = GST_VIDEO_INFO_FPS_N(info);
@@ -327,25 +304,25 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
   GST_INFO_OBJECT(self, "Extracted from caps: %dx%d @ %d/%d fps", 
                   width, height, fps_n, fps_d);
 
-  // Vérifier que les dimensions sont valides
+  // Check that the dimensions are valid  
   if (width <= 0 || height <= 0) {
     GST_ERROR_OBJECT(self, "Invalid dimensions extracted: %dx%d", width, height);
     return FALSE;
   }
 
-  // Assigner aux variables de l'instance
+  // Assign to instance variables  
   self->width = width;
   self->height = height;
   self->fps_n = fps_n;
   self->fps_d = fps_d;
 
-  // Configurer les paramètres XEVE
+  // Configure XEVE settings
   priv->xeve_param->w = width;
   priv->xeve_param->h = height;
   priv->xeve_param->fps.num = fps_n;
   priv->xeve_param->fps.den = fps_d;
 
-  // Configuration du format de couleur
+  // Color format configuration
   switch (GST_VIDEO_INFO_FORMAT(info)) {
     case GST_VIDEO_FORMAT_I420:
     case GST_VIDEO_FORMAT_NV12:
@@ -358,13 +335,13 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
       return FALSE;
   }
 
-  // Nettoyer l'encodeur existant
+  // Clean the existing encoder
   if (priv->xeve_handle) {
     xeve_delete(priv->xeve_handle);
     priv->xeve_handle = NULL;
   }
 
-  // Configurer tous les paramètres de l'encodeur
+  // Configure all encoder settings
   priv->xeve_param->profile = self->profile;
   priv->xeve_param->bitrate = self->bitrate;
   priv->xeve_param->qp = self->qp;
@@ -372,7 +349,7 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
   priv->xeve_param->keyint = self->keyint_max;
   priv->xeve_param->use_annexb = self->annexb;
 
-  // Appliquer les presets
+  // Apply presets
   xeve_param_ppt(priv->xeve_param, self->profile, self->preset, self->tune);
 
   #ifdef DEBUG 
@@ -385,8 +362,10 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
     g_print("File: %s | Function: %s | Line: %d\n", __FILE__, __func__, __LINE__);
   #endif 
 
-  // Créer l'encodeur XEVE - CORRECTION: passer xeve_param, pas xeve_cdsc
-  priv->xeve_handle = xeve_create(priv->xeve_param, &err);
+// Create the XEVE encoder - CORRECTION: pass xeve_param, not xeve_cdsc  
+  //priv->xeve_handle = xeve_create(priv->xeve_param, &err);
+    priv->xeve_handle = xeve_create(priv->xeve_cdsc, &err);
+
   if (!priv->xeve_handle || err != XEVE_OK) {
     GST_ERROR_OBJECT(self, "Failed to initialize XEVE encoder (err=%d)", err);
     return FALSE;
@@ -395,7 +374,7 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
   priv->encoder_initialized = TRUE;
   GST_INFO_OBJECT(self, "XEVE encoder initialized successfully: %dx%d", width, height);
 
-  // Définir les caps de sortie
+  // Set the output caps  
   GstVideoCodecState *output_state;
   GstCaps *output_caps;
   
