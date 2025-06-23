@@ -6,6 +6,8 @@
 #include <gst/video/gstvideoencoder.h>
 #include <xeve.h>
 #define DEBUG TRUE
+#define MAX_BITSTREAM_SIZE (10*1000*1000)
+
 G_BEGIN_DECLS
 
 #define GST_TYPE_XEVE_ENC            (gst_xeve_enc_get_type())
