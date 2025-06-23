@@ -529,21 +529,21 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
 
 #endif
 
-XEVE               id = NULL;
+//XEVE               id = NULL;
 
    
 
 
-    //priv->xeve_handle = xeve_create(priv->xeve_cdsc, &err);
-    
+    priv->xeve_handle = xeve_create(priv->xeve_cdsc, &err);
+ #ifdef false   
     /* create encoder */
-    id = xeve_create(&priv->xeve_cdsc, NULL);
+    //id = xeve_create(priv->xeve_cdsc, NULL);
     if (id == NULL)
     {
         g_print("cannot create XEVE encoder\n");
         //ret = -1; goto ERR;
     }
-
+#endif
 
 
 
@@ -587,18 +587,20 @@ gst_xeve_enc_handle_frame(GstVideoEncoder *encoder, GstVideoCodecFrame *frame)
   GstBuffer *out_buf;
   GstFlowReturn ret = GST_FLOW_ERROR;
   int err;
-
-  if (!priv->xeve_param) {
+/*
+  if (!priv->xeve_cdsc->param) {
     GST_ERROR_OBJECT(self, "XEVE param not initialized");
     goto done;
   }
+  */
+  
 
   if (!gst_buffer_map(frame->input_buffer, &in_map, GST_MAP_READ)) {
     GST_ERROR_OBJECT(self, "Failed to map input buffer");
     goto done;
   }
 
-  img_buf.cs = priv->xeve_param->cs;
+  img_buf.cs = priv->xeve_cdsc->param.cs;
   img_buf.w[0] = GST_VIDEO_INFO_WIDTH(info);
   img_buf.h[0] = GST_VIDEO_INFO_HEIGHT(info);
   img_buf.a[0] = in_map.data;
