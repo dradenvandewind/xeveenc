@@ -485,8 +485,8 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
     case GST_VIDEO_FORMAT_I420:
     case GST_VIDEO_FORMAT_NV12:
     case GST_VIDEO_FORMAT_YV12:
-      priv->xeve_param->cs = XEVE_CS_YCBCR420;
-      priv->xeve_cdsc->param.cs = XEVE_CS_YCBCR420;
+      priv->xeve_cdsc->param.cs = XEVE_CS_SET(XEVE_CS_YCBCR420, priv->xeve_cdsc->param.codec_bit_depth, 0);
+
       break;
     default:
       GST_ERROR_OBJECT(self, "Unsupported input format: %s", 
@@ -581,89 +581,88 @@ int gstbuffer_to_xeve_imgb(GstBuffer *gst_buffer, GstVideoInfo *video_info, XEVE
     if (!gst_buffer || !video_info || !imgb) {
         return -1;
     }
-    
-    // Mapper le buffer GStreamer
-    if (!gst_buffer_map(gst_buffer, &map_info, GST_MAP_READ)) {
-        g_print("Erreur: Impossible de mapper le buffer\n");
-        return -1;
-    }
-    
-    // Initialiser la structure XEVE_IMGB
-    memset(imgb, 0, sizeof(XEVE_IMGB));
-    
-    // Définir le color space selon le format GStreamer
-    switch (GST_VIDEO_INFO_FORMAT(video_info)) {
-        case GST_VIDEO_FORMAT_I420:
-        case GST_VIDEO_FORMAT_YV12:
-            imgb->cs = 0; // YUV420 (valeur à adapter selon XEVE)
-            imgb->np = 3; // Y, U, V planes
-            break;
-        case GST_VIDEO_FORMAT_NV12:
-            imgb->cs = 1; // NV12 (valeur à adapter selon XEVE)
-            imgb->np = 2; // Y, UV planes
-            break;
-        case GST_VIDEO_FORMAT_RGB:
-        case GST_VIDEO_FORMAT_BGR:
-            imgb->cs = 2; // RGB (valeur à adapter selon XEVE)
-            imgb->np = 1; // Un seul plane
-            break;
-        default:
-            gst_buffer_unmap(gst_buffer, &map_info);
-            return -2; // Format non supporté
-    }
-    
-    // Remplir les informations pour chaque plane
-    guint8 *data = map_info.data;
-    //gsize offset = 0;
-    
-    for (int i = 0; i < imgb->np; i++) {
-        // Calculer les dimensions du plane selon le format
-        if (i == 0) { // Plane Y ou RGB
-            imgb->w[i] = GST_VIDEO_INFO_WIDTH(video_info);
-            imgb->h[i] = GST_VIDEO_INFO_HEIGHT(video_info);
-        } else { // Planes U/V pour formats YUV
-            switch (GST_VIDEO_INFO_FORMAT(video_info)) {
-                case GST_VIDEO_FORMAT_I420:
-                case GST_VIDEO_FORMAT_YV12:
-                    imgb->w[i] = GST_VIDEO_INFO_WIDTH(video_info) / 2;
+   // Map the GStreamer buffer
+if (!gst_buffer_map(gst_buffer, &map_info, GST_MAP_READ)) {
+    g_print("we can't map buffer\n");
+    return -1;
+}
+
+// Initialize the XEVE_IMGB structure
+memset(imgb, 0, sizeof(XEVE_IMGB));
+
+// Set the color space according to the GStreamer format
+switch (GST_VIDEO_INFO_FORMAT(video_info)) {
+    case GST_VIDEO_FORMAT_I420:
+    case GST_VIDEO_FORMAT_YV12:
+        imgb->cs = 0; // YUV420 (value to be adjusted according to XEVE)
+        imgb->np = 3; // Y, U, V planes
+        break;
+    case GST_VIDEO_FORMAT_NV12:
+        imgb->cs = 1; // NV12 (value to be adjusted according to XEVE)
+        imgb->np = 2; // Y, UV planes
+        break;
+    case GST_VIDEO_FORMAT_RGB:
+    case GST_VIDEO_FORMAT_BGR:
+        imgb->cs = 2; // RGB (value to be adjusted according to XEVE)
+        imgb->np = 1; // Single plane
+        break;
+    default:
+        gst_buffer_unmap(gst_buffer, &map_info);
+        return -2; // Unsupported format
+}
+
+// Fill in the information for each plane
+guint8 *data = map_info.data;
+// gsize offset = 0;
+
+for (int i = 0; i < imgb->np; i++) {
+    // Compute the dimensions of the plane according to the format
+    if (i == 0) { // Y plane or RGB
+        imgb->w[i] = GST_VIDEO_INFO_WIDTH(video_info);
+        imgb->h[i] = GST_VIDEO_INFO_HEIGHT(video_info);
+    } else { // U/V planes for YUV formats
+        switch (GST_VIDEO_INFO_FORMAT(video_info)) {
+            case GST_VIDEO_FORMAT_I420:
+            case GST_VIDEO_FORMAT_YV12:
+                imgb->w[i] = GST_VIDEO_INFO_WIDTH(video_info) / 2;
+                imgb->h[i] = GST_VIDEO_INFO_HEIGHT(video_info) / 2;
+                break;
+            case GST_VIDEO_FORMAT_NV12:
+                if (i == 1) { // UV plane
+                    imgb->w[i] = GST_VIDEO_INFO_WIDTH(video_info);
                     imgb->h[i] = GST_VIDEO_INFO_HEIGHT(video_info) / 2;
-                    break;
-                case GST_VIDEO_FORMAT_NV12:
-                    if (i == 1) { // Plane UV
-                        imgb->w[i] = GST_VIDEO_INFO_WIDTH(video_info);
-                        imgb->h[i] = GST_VIDEO_INFO_HEIGHT(video_info) / 2;
-                    }
-                    break;
-                default:
-                    break;
-            }
+                }
+                break;
+            default:
+                break;
         }
-        
-        // Position (généralement 0,0 pour le frame complet)
-        imgb->x[i] = 0;
-        imgb->y[i] = 0;
-        
-        // Calculer le stride
-        imgb->s[i] = GST_VIDEO_INFO_PLANE_STRIDE(video_info, i);
-        
-        // Adresse des données du plane avec offset
-        imgb->a[i] = data + GST_VIDEO_INFO_PLANE_OFFSET(video_info, i);
-        
-        // Dimensions alignées (souvent identiques aux dimensions normales)
-        imgb->aw[i] = imgb->w[i];
-        imgb->ah[i] = imgb->h[i];
-        
-        // Padding (généralement 0 si pas de padding spécifique)
-        imgb->padl[i] = 0;
-        imgb->padr[i] = 0;
-        imgb->padu[i] = 0;
-        imgb->padb[i] = 0;
-        
-        // Buffer address et size
-        imgb->baddr[i] = imgb->a[i];
-        imgb->bsize[i] = imgb->s[i] * imgb->h[i];
     }
-    
+
+    // Position (usually 0,0 for the full frame)
+    imgb->x[i] = 0;
+    imgb->y[i] = 0;
+
+    // Compute the stride
+    imgb->s[i] = GST_VIDEO_INFO_PLANE_STRIDE(video_info, i);
+
+    // Data address of the plane with offset
+    imgb->a[i] = data + GST_VIDEO_INFO_PLANE_OFFSET(video_info, i);
+
+    // Aligned dimensions (often identical to normal dimensions)
+    imgb->aw[i] = imgb->w[i];
+    imgb->ah[i] = imgb->h[i];
+
+    // Padding (usually 0 if no specific padding)
+    imgb->padl[i] = 0;
+    imgb->padr[i] = 0;
+    imgb->padu[i] = 0;
+    imgb->padb[i] = 0;
+
+    // Buffer address and size
+    imgb->baddr[i] = imgb->a[i];
+    imgb->bsize[i] = imgb->s[i] * imgb->h[i];
+}
+ 
     // Timestamps
     if (GST_BUFFER_PTS_IS_VALID(gst_buffer)) {
         imgb->ts[0] = GST_BUFFER_PTS(gst_buffer);
