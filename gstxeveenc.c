@@ -717,8 +717,7 @@ gst_xeve_enc_handle_frame(GstVideoEncoder *encoder, GstVideoCodecFrame *frame)
     XEVE_BITB bit_buf = {0};
     GstBuffer *out_buf;
     GstFlowReturn ret = GST_FLOW_ERROR;
-    //XEVE_CLK           clk_beg, clk_end, clk_tot;
-
+ 
     int err;
     GstMapInfo in_map, out_map;
     // Convert GstBuffer to XEVE_IMGB using the helper function
@@ -755,8 +754,7 @@ gst_xeve_enc_handle_frame(GstVideoEncoder *encoder, GstVideoCodecFrame *frame)
     bit_buf.bsize = out_map.size;
 
     // Encode the frame
-    //clk_beg = xeve_clk_get();
-
+  
     ret = xeve_encode(priv->xeve_handle, &bit_buf, &stat);
     
     // Unmap output buffer immediately after encoding
