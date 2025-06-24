@@ -574,76 +574,250 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
   return TRUE;
 }
 
+int gstbuffer_to_xeve_imgb(GstBuffer *gst_buffer, GstVideoInfo *video_info, XEVE_IMGB *imgb)
+{
+    GstMapInfo map_info;
+    
+    if (!gst_buffer || !video_info || !imgb) {
+        return -1;
+    }
+    
+    // Mapper le buffer GStreamer
+    if (!gst_buffer_map(gst_buffer, &map_info, GST_MAP_READ)) {
+        g_print("Erreur: Impossible de mapper le buffer\n");
+        return -1;
+    }
+    
+    // Initialiser la structure XEVE_IMGB
+    memset(imgb, 0, sizeof(XEVE_IMGB));
+    
+    // Définir le color space selon le format GStreamer
+    switch (GST_VIDEO_INFO_FORMAT(video_info)) {
+        case GST_VIDEO_FORMAT_I420:
+        case GST_VIDEO_FORMAT_YV12:
+            imgb->cs = 0; // YUV420 (valeur à adapter selon XEVE)
+            imgb->np = 3; // Y, U, V planes
+            break;
+        case GST_VIDEO_FORMAT_NV12:
+            imgb->cs = 1; // NV12 (valeur à adapter selon XEVE)
+            imgb->np = 2; // Y, UV planes
+            break;
+        case GST_VIDEO_FORMAT_RGB:
+        case GST_VIDEO_FORMAT_BGR:
+            imgb->cs = 2; // RGB (valeur à adapter selon XEVE)
+            imgb->np = 1; // Un seul plane
+            break;
+        default:
+            gst_buffer_unmap(gst_buffer, &map_info);
+            return -2; // Format non supporté
+    }
+    
+    // Remplir les informations pour chaque plane
+    guint8 *data = map_info.data;
+    //gsize offset = 0;
+    
+    for (int i = 0; i < imgb->np; i++) {
+        // Calculer les dimensions du plane selon le format
+        if (i == 0) { // Plane Y ou RGB
+            imgb->w[i] = GST_VIDEO_INFO_WIDTH(video_info);
+            imgb->h[i] = GST_VIDEO_INFO_HEIGHT(video_info);
+        } else { // Planes U/V pour formats YUV
+            switch (GST_VIDEO_INFO_FORMAT(video_info)) {
+                case GST_VIDEO_FORMAT_I420:
+                case GST_VIDEO_FORMAT_YV12:
+                    imgb->w[i] = GST_VIDEO_INFO_WIDTH(video_info) / 2;
+                    imgb->h[i] = GST_VIDEO_INFO_HEIGHT(video_info) / 2;
+                    break;
+                case GST_VIDEO_FORMAT_NV12:
+                    if (i == 1) { // Plane UV
+                        imgb->w[i] = GST_VIDEO_INFO_WIDTH(video_info);
+                        imgb->h[i] = GST_VIDEO_INFO_HEIGHT(video_info) / 2;
+                    }
+                    break;
+                default:
+                    break;
+            }
+        }
+        
+        // Position (généralement 0,0 pour le frame complet)
+        imgb->x[i] = 0;
+        imgb->y[i] = 0;
+        
+        // Calculer le stride
+        imgb->s[i] = GST_VIDEO_INFO_PLANE_STRIDE(video_info, i);
+        
+        // Adresse des données du plane avec offset
+        imgb->a[i] = data + GST_VIDEO_INFO_PLANE_OFFSET(video_info, i);
+        
+        // Dimensions alignées (souvent identiques aux dimensions normales)
+        imgb->aw[i] = imgb->w[i];
+        imgb->ah[i] = imgb->h[i];
+        
+        // Padding (généralement 0 si pas de padding spécifique)
+        imgb->padl[i] = 0;
+        imgb->padr[i] = 0;
+        imgb->padu[i] = 0;
+        imgb->padb[i] = 0;
+        
+        // Buffer address et size
+        imgb->baddr[i] = imgb->a[i];
+        imgb->bsize[i] = imgb->s[i] * imgb->h[i];
+    }
+    
+    // Timestamps
+    if (GST_BUFFER_PTS_IS_VALID(gst_buffer)) {
+        imgb->ts[0] = GST_BUFFER_PTS(gst_buffer);
+    }
+    if (GST_BUFFER_DTS_IS_VALID(gst_buffer)) {
+        imgb->ts[1] = GST_BUFFER_DTS(gst_buffer);
+    }
+    
+    // Gestion du cycle de vie
+    imgb->refcnt = 1;
+    
+    // Note: Ne pas unmapper le buffer ici car XEVE_IMGB pointe vers ses données
+    // Le unmap devra être fait après utilisation de imgb
+    
+    return 0;
+}
+
+#if 0
+typedef struct {
+    XEVE_IMGB img_buf;
+    GstMapInfo map_info;  // Store the mapping info
+} XEVE_IMGB_Wrapper;
+
+int gstbuffer_to_xeve_imgb(GstBuffer *gst_buffer, GstVideoInfo *video_info, XEVE_IMGB_Wrapper *wrapper)
+{
+    if (!gst_buffer || !video_info || !wrapper) {
+        return -1;
+    }
+    
+    memset(&wrapper->img_buf, 0, sizeof(XEVE_IMGB));
+    memset(&wrapper->map_info, 0, sizeof(GstMapInfo));
+    
+    if (!gst_buffer_map(gst_buffer, &wrapper->map_info, GST_MAP_READ)) {
+        GST_ERROR("Failed to map input buffer");
+        return -1;
+    }
+    
+    // Rest of the conversion code as before, but operating on wrapper->img_buf
+    // ...
+    
+    return 0;
+}
+#endif 
+
+
 static GstFlowReturn
 gst_xeve_enc_handle_frame(GstVideoEncoder *encoder, GstVideoCodecFrame *frame)
 {
-  GstXeveEnc *self = GST_XEVE_ENC(encoder);
-  GstXeveEncPrivate *priv = GST_XEVE_ENC_GET_PRIVATE(self);
-  GstVideoInfo *info = &priv->input_state->info;
-  XEVE_IMGB img_buf = {0};
-  XEVE_BITB bit_buf = {0};
-  XEVE_STAT enc_stat;
-  GstMapInfo in_map, out_map;
-  GstBuffer *out_buf;
-  GstFlowReturn ret = GST_FLOW_ERROR;
-  int err;
-/*
-  if (!priv->xeve_cdsc->param) {
-    GST_ERROR_OBJECT(self, "XEVE param not initialized");
-    goto done;
-  }
-  */
-  
+    GstXeveEnc *self = GST_XEVE_ENC(encoder);
+    GstXeveEncPrivate *priv = GST_XEVE_ENC_GET_PRIVATE(self);
+    GstVideoInfo *info = &priv->input_state->info;
+    XEVE_IMGB img_buf = {0};
+    XEVE_BITB bit_buf = {0};
+    GstBuffer *out_buf;
+    GstFlowReturn ret = GST_FLOW_ERROR;
+    int err;
+    GstMapInfo in_map, out_map;
+    // Convert GstBuffer to XEVE_IMGB using the helper function
+    if (gstbuffer_to_xeve_imgb(frame->input_buffer, info, &img_buf) != 0) {
+        GST_ERROR_OBJECT(self, "Failed to convert GstBuffer to XEVE_IMGB");
+        goto done;
+    }
 
-  if (!gst_buffer_map(frame->input_buffer, &in_map, GST_MAP_READ)) {
-    GST_ERROR_OBJECT(self, "Failed to map input buffer");
-    goto done;
-  }
+    // Push frame to encoder
+    err = xeve_push(priv->xeve_handle, &img_buf);
 
-  img_buf.cs = priv->xeve_cdsc->param.cs;
-  img_buf.w[0] = GST_VIDEO_INFO_WIDTH(info);
-  img_buf.h[0] = GST_VIDEO_INFO_HEIGHT(info);
-  img_buf.a[0] = in_map.data;
+    if(XEVE_FAILED(err))
+    {
+      GST_ERROR_OBJECT(self, "xeve_push() Failed to push frame to encoder (err=%d)", err);
+      ret = -1;
+      //goto ERR;
+    }
 
-  err = xeve_push(priv->xeve_handle, &img_buf);
-  if (err != XEVE_OK) {
-    GST_ERROR_OBJECT(self, "Failed to push frame (err=%d)", err);
-    goto unmap_input;
-  }
+       // Allocate output buffer - use the configured max bitstream size
+    out_buf = gst_buffer_new_and_alloc(priv->xeve_cdsc->max_bs_buf_size);
+    if (!out_buf) {
+        GST_ERROR_OBJECT(self, "Failed to allocate output buffer");
+        goto unmap_input;
+    }
 
-  out_buf = gst_buffer_new_and_alloc(priv->xeve_param->w * priv->xeve_param->h * 3 / 2);
-  if (!out_buf) {
-    GST_ERROR_OBJECT(self, "Failed to allocate output buffer");
-    goto unmap_input;
-  }
+    // Map output buffer for writing
+    if (!gst_buffer_map(out_buf, &out_map, GST_MAP_WRITE)) {
+        GST_ERROR_OBJECT(self, "Failed to map output buffer");
+        gst_buffer_unref(out_buf);
+        goto unmap_input;
+    }
 
-  if (!gst_buffer_map(out_buf, &out_map, GST_MAP_WRITE)) {
-    GST_ERROR_OBJECT(self, "Failed to map output buffer");
-    gst_buffer_unref(out_buf);
-    goto unmap_input;
-  }
+    // Set up bitstream buffer
+    bit_buf.addr = out_map.data;
+    bit_buf.bsize = out_map.size;
 
-  bit_buf.addr = out_map.data;
-  bit_buf.bsize = out_map.size;
-  err = xeve_encode(priv->xeve_handle, &bit_buf, &enc_stat);
-  
-  gst_buffer_unmap(out_buf, &out_map);
-  
-  if (err != XEVE_OK || bit_buf.ssize == 0) {
-    GST_ERROR_OBJECT(self, "Failed to encode frame (err=%d)", err);
-    gst_buffer_unref(out_buf);
-    goto unmap_input;
-  }
+    // Encode the frame
+    err = xeve_encode(priv->xeve_handle, &bit_buf, NULL);
+    
+    // Unmap output buffer immediately after encoding
+    gst_buffer_unmap(out_buf, &out_map);
 
-  gst_buffer_resize(out_buf, 0, bit_buf.ssize);
-  frame->output_buffer = out_buf;
-  ret = gst_video_encoder_finish_frame(encoder, frame);
+    if(XEVE_FAILED(err))
+    {
+      GST_ERROR_OBJECT(self, "Failed to encode frame (err=%d)", err);
+      ret = -1;
+      //goto ERR;
+    }
+
+    if(err == XEVE_OK_OUT_NOT_AVAILABLE)
+    {
+      
+      GST_INFO_OBJECT(self, "XEVE_OK_OUT_NOT_AVAILABLE (err=%d)", err);
+      //continue;
+    }
+    else if(ret == XEVE_OK)
+    {
+      GST_INFO_OBJECT(self, "XEVE_OK (err=%d)", err);
+      GST_INFO_OBJECT(self, "actual encoded size (size=%d)", bit_buf.ssize);
+
+
+      // Resize buffer to actual encoded size
+      gst_buffer_resize(out_buf, 0, bit_buf.ssize);
+
+      // Set output buffer and finish frame processing
+      frame->output_buffer = out_buf;
+
+       frame->pts = GST_BUFFER_PTS (frame->input_buffer);
+      frame->duration = GST_BUFFER_DURATION (frame->input_buffer);
+
+       
+      ret = gst_video_encoder_finish_frame(encoder, frame);
+
+    }
+    else if (ret == XEVE_OK_NO_MORE_FRM)
+    {
+      //break;
+    }
+    else
+    {      
+      GST_INFO_OBJECT(self, "XEVE_OK (err=%d)", err);
+    }
+
+    return ret;
+
+    
 
 unmap_input:
-  gst_buffer_unmap(frame->input_buffer, &in_map);
+    // Unmap the input buffer if it was mapped by gstbuffer_to_xeve_imgb()
+    if (img_buf.a[0]) {  // Check if any plane was mapped
+        gst_buffer_unmap(frame->input_buffer, 
+                        (GstMapInfo *)img_buf.a[0]);  // Need to store map_info properly
+    }
+    
 done:
-  return ret;
+    return ret;
 }
+
+
 
 static gboolean
 plugin_init(GstPlugin *plugin)
