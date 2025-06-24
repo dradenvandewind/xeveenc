@@ -140,7 +140,6 @@ GST_DEBUG_CATEGORY_STATIC(gst_xeve_enc_debug);
 
 typedef struct {
   XEVE xeve_handle;
-  XEVE_PARAM *xeve_param;      // Pointer instead of direct structure
   XEVE_CDSC *xeve_cdsc;        // Pointer instead of direct structure
   gboolean encoder_initialized;
   GstVideoCodecState *input_state;
@@ -205,7 +204,6 @@ static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
 static void
 gst_xeve_enc_class_init(GstXeveEncClass *klass)
 {
-  g_print("Private struct size: %zu\n", sizeof(GstXeveEncPrivate));
   GObjectClass *gobject_class = G_OBJECT_CLASS(klass);
   GstVideoEncoderClass *video_encoder_class = GST_VIDEO_ENCODER_CLASS(klass);
   GstElementClass *element_class = GST_ELEMENT_CLASS(klass);
@@ -267,23 +265,18 @@ gst_xeve_enc_init(GstXeveEnc *self)
   self->annexb = TRUE;
 
   // Initialize pointers to NULL before allocation
-  priv->xeve_param = NULL;
   priv->xeve_cdsc = NULL;
   priv->xeve_handle = NULL;
   priv->input_state = NULL;
   priv->encoder_initialized = FALSE;
 
   // Secure allocation  
-  priv->xeve_param = g_malloc0(sizeof(XEVE_PARAM));
   priv->xeve_cdsc = g_malloc0(sizeof(XEVE_CDSC));
-
-  
-
-
   priv->xeve_cdsc->max_bs_buf_size = MAX_BITSTREAM_SIZE;
-
+#if 0
   g_print("priv->xeve_cdsc %x \n", priv->xeve_cdsc);
   g_print("priv->xeve_cdsc->max_bs_buf_size %d \n", priv->xeve_cdsc->max_bs_buf_size);
+#endif 
 
   if(priv->xeve_cdsc)
   {
@@ -291,11 +284,6 @@ gst_xeve_enc_init(GstXeveEnc *self)
     xeve_param_default(&priv->xeve_cdsc->param);
 
   }
-  /*
-  if (priv->xeve_param) {
-    xeve_param_default(priv->xeve_param);
-  }
-    */
 
   GST_DEBUG_OBJECT(self, "init completed");
 }
@@ -359,11 +347,7 @@ gst_xeve_enc_dispose(GObject *object)
     priv->input_state = NULL;
   }
 
-  // Check that pointers are not NULL before release  
-  if (priv->xeve_param) {
-    g_free(priv->xeve_param);
-    priv->xeve_param = NULL;
-  }
+  // Check that pointers are not NULL before release 
 
   if (priv->xeve_cdsc) {
     g_free(priv->xeve_cdsc);
@@ -383,8 +367,8 @@ gst_xeve_enc_start(GstVideoEncoder *encoder)
 
   GST_DEBUG_OBJECT(self, "start called");
 
-  if (!priv->xeve_param) {
-    GST_ERROR_OBJECT(self, "XEVE param not initialized");
+  if (!priv->xeve_cdsc) {
+    GST_ERROR_OBJECT(self, "XEVE  not initialized");
     return FALSE;
   }
 
@@ -423,10 +407,11 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
   GstXeveEncPrivate *priv = GST_XEVE_ENC_GET_PRIVATE(self);
   GstVideoInfo *info = &state->info;
   int err = 0;
+  int ret = 0;
 
   GST_INFO_OBJECT(self, "set_format called");
 
-  if (!priv->xeve_param || !priv->xeve_cdsc) {
+  if (!priv->xeve_cdsc) {  
     GST_ERROR_OBJECT(self, "XEVE structures not initialized");
     return FALSE;
   }
@@ -490,16 +475,6 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
     xeve_delete(priv->xeve_handle);
     priv->xeve_handle = NULL;
   }
-
-  // Configure all encoder settings
-  #if 0
-  priv->xeve_param->profile = self->profile;
-  priv->xeve_param->bitrate = self->bitrate;
-  priv->xeve_param->qp = self->qp;
-  priv->xeve_param->closed_gop = self->closed_gop;
-  priv->xeve_param->keyint = self->keyint_max;
-  priv->xeve_param->use_annexb = self->annexb;
-  #else 
 /*
   
   priv->xeve_cdsc->param.profile = self->profile;
@@ -511,12 +486,18 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
 */
 priv->xeve_cdsc->param.threads = 8;
 
-  #endif
 
   // Apply presets
-  //xeve_param_ppt(priv->xeve_param, self->profile, self->preset, self->tune);
 
-  xeve_param_ppt(&priv->xeve_cdsc->param, XEVE_PROFILE_BASELINE, XEVE_PRESET_SLOW, XEVE_TUNE_NONE);
+  ret = xeve_param_ppt(&priv->xeve_cdsc->param, XEVE_PROFILE_BASELINE, XEVE_PRESET_SLOW, XEVE_TUNE_NONE);
+  if (XEVE_FAILED(ret))
+    {
+        GST_ERROR_OBJECT(self, "cannot set profile, preset, tune to parameter: %d", 
+                       ret);
+
+        ret = -1;
+        // goto ERR;
+    }
 
     g_print("File: %s | Function: %s | Line: %d\n", __FILE__, __func__, __LINE__);
 
@@ -525,14 +506,20 @@ priv->xeve_cdsc->param.threads = 8;
   //priv->xeve_handle = xeve_create(priv->xeve_param, &err);
 #ifdef DEBUG
 
-
     g_print("priv->xeve_cdsc %x \n", priv->xeve_cdsc);
     g_print("priv->xeve_cdsc->max_bs_buf_size %d \n", priv->xeve_cdsc->max_bs_buf_size);
     print_xeve_param(&priv->xeve_cdsc->param);
 
-
-
 #endif
+
+  if (ret = xeve_param_check(&priv->xeve_cdsc->param))
+    {
+        
+        GST_ERROR_OBJECT(self, "invalid configuration: %d", 
+                       ret);
+        ret = -1; 
+        //goto ERR;
+    }
 
 //XEVE               id = NULL;
 
@@ -540,6 +527,14 @@ priv->xeve_cdsc->param.threads = 8;
 
 
     priv->xeve_handle = xeve_create(priv->xeve_cdsc, &err);
+    if (!priv->xeve_handle)
+    {
+      GST_ERROR_OBJECT(self, "cannot create XEVE encoder: %d", 
+                       err);
+
+
+
+    }
  #ifdef false   
     /* create encoder */
     //id = xeve_create(priv->xeve_cdsc, NULL);
