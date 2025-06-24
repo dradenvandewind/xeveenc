@@ -463,20 +463,11 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
   self->fps_d = fps_d;
 
   // Configure XEVE settings
-#if 0
-  priv->xeve_param->w = width;
-  priv->xeve_param->h = height;
-  priv->xeve_param->fps.num = fps_n;
-  priv->xeve_param->fps.den = fps_d;
-#else 
+
   priv->xeve_cdsc->param.w = width;
   priv->xeve_cdsc->param.h = height;
   priv->xeve_cdsc->param.fps.num = fps_n;
   priv->xeve_cdsc->param.fps.den = fps_d;
-
-
-
-#endif
 
 
 
@@ -501,12 +492,26 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
   }
 
   // Configure all encoder settings
+  #if 0
   priv->xeve_param->profile = self->profile;
   priv->xeve_param->bitrate = self->bitrate;
   priv->xeve_param->qp = self->qp;
   priv->xeve_param->closed_gop = self->closed_gop;
   priv->xeve_param->keyint = self->keyint_max;
   priv->xeve_param->use_annexb = self->annexb;
+  #else 
+/*
+  
+  priv->xeve_cdsc->param.profile = self->profile;
+  priv->xeve_cdsc->param.bitrate = self->bitrate;
+  priv->xeve_cdsc->param.qp = self->qp;
+  priv->xeve_cdsc->param.closed_gop = self->closed_gop;
+  priv->xeve_cdsc->param.keyint = self->keyint_max;
+  priv->xeve_cdsc->param.use_annexb = self->annexb;
+*/
+priv->xeve_cdsc->param.threads = 8;
+
+  #endif
 
   // Apply presets
   //xeve_param_ppt(priv->xeve_param, self->profile, self->preset, self->tune);
