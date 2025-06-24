@@ -732,7 +732,7 @@ gst_xeve_enc_handle_frame(GstVideoEncoder *encoder, GstVideoCodecFrame *frame)
     {
       GST_ERROR_OBJECT(self, "xeve_push() Failed to push frame to encoder (err=%d)", err);
       ret = -1;
-      //goto ERR;
+
     }
 
        // Allocate output buffer - use the configured max bitstream size
@@ -764,7 +764,6 @@ gst_xeve_enc_handle_frame(GstVideoEncoder *encoder, GstVideoCodecFrame *frame)
     {
       GST_ERROR_OBJECT(self, "Failed to encode frame (ret=%d)", ret);
       ret = -1;
-      //goto ERR;
     }
 
     if(ret == XEVE_OK_OUT_NOT_AVAILABLE)
