@@ -773,6 +773,7 @@ gst_xeve_enc_handle_frame(GstVideoEncoder *encoder, GstVideoCodecFrame *frame)
     {
       
       GST_INFO_OBJECT(self, "XEVE_OK_OUT_NOT_AVAILABLE (ret=%d)", ret);
+      GST_INFO_OBJECT(self, "progress success, but output is not available temporarily (ret=%d)", ret);
       ret = -1;
       //continue;
     }
