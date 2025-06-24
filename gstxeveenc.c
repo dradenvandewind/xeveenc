@@ -531,9 +531,6 @@ priv->xeve_cdsc->param.threads = 8;
     {
       GST_ERROR_OBJECT(self, "cannot create XEVE encoder: %d", 
                        err);
-
-
-
     }
  #ifdef false   
     /* create encoder */
@@ -715,9 +712,13 @@ gst_xeve_enc_handle_frame(GstVideoEncoder *encoder, GstVideoCodecFrame *frame)
     GstXeveEncPrivate *priv = GST_XEVE_ENC_GET_PRIVATE(self);
     GstVideoInfo *info = &priv->input_state->info;
     XEVE_IMGB img_buf = {0};
+    XEVE_STAT stat; /* encoding status */
+
     XEVE_BITB bit_buf = {0};
     GstBuffer *out_buf;
     GstFlowReturn ret = GST_FLOW_ERROR;
+    //XEVE_CLK           clk_beg, clk_end, clk_tot;
+
     int err;
     GstMapInfo in_map, out_map;
     // Convert GstBuffer to XEVE_IMGB using the helper function
@@ -728,7 +729,6 @@ gst_xeve_enc_handle_frame(GstVideoEncoder *encoder, GstVideoCodecFrame *frame)
 
     // Push frame to encoder
     err = xeve_push(priv->xeve_handle, &img_buf);
-
     if(XEVE_FAILED(err))
     {
       GST_ERROR_OBJECT(self, "xeve_push() Failed to push frame to encoder (err=%d)", err);
@@ -755,41 +755,45 @@ gst_xeve_enc_handle_frame(GstVideoEncoder *encoder, GstVideoCodecFrame *frame)
     bit_buf.bsize = out_map.size;
 
     // Encode the frame
-    err = xeve_encode(priv->xeve_handle, &bit_buf, NULL);
+    //clk_beg = xeve_clk_get();
+
+    ret = xeve_encode(priv->xeve_handle, &bit_buf, &stat);
     
     // Unmap output buffer immediately after encoding
     gst_buffer_unmap(out_buf, &out_map);
 
-    if(XEVE_FAILED(err))
+    if(XEVE_FAILED(ret))
     {
-      GST_ERROR_OBJECT(self, "Failed to encode frame (err=%d)", err);
+      GST_ERROR_OBJECT(self, "Failed to encode frame (ret=%d)", ret);
       ret = -1;
       //goto ERR;
     }
 
-    if(err == XEVE_OK_OUT_NOT_AVAILABLE)
+    if(ret == XEVE_OK_OUT_NOT_AVAILABLE)
     {
       
-      GST_INFO_OBJECT(self, "XEVE_OK_OUT_NOT_AVAILABLE (err=%d)", err);
+      GST_INFO_OBJECT(self, "XEVE_OK_OUT_NOT_AVAILABLE (ret=%d)", ret);
+      ret = -1;
       //continue;
     }
     else if(ret == XEVE_OK)
     {
-      GST_INFO_OBJECT(self, "XEVE_OK (err=%d)", err);
-      GST_INFO_OBJECT(self, "actual encoded size (size=%d)", bit_buf.ssize);
+      GST_INFO_OBJECT(self, "XEVE_OK (ret=%d)", ret);
+      GST_INFO_OBJECT(self, "actual encoded size (size=%d)", stat.write);
 
+      if(stat.write > 0)
+      {
+        // Resize buffer to actual encoded size
+        gst_buffer_resize(out_buf, 0, stat.write);
 
-      // Resize buffer to actual encoded size
-      gst_buffer_resize(out_buf, 0, bit_buf.ssize);
+        // Set output buffer and finish frame processing
+        frame->output_buffer = out_buf;
 
-      // Set output buffer and finish frame processing
-      frame->output_buffer = out_buf;
-
-       frame->pts = GST_BUFFER_PTS (frame->input_buffer);
-      frame->duration = GST_BUFFER_DURATION (frame->input_buffer);
-
-       
-      ret = gst_video_encoder_finish_frame(encoder, frame);
+        frame->pts = GST_BUFFER_PTS (frame->input_buffer);
+        frame->duration = GST_BUFFER_DURATION (frame->input_buffer);
+        ret = gst_video_encoder_finish_frame(encoder, frame);
+        GST_INFO_OBJECT(self, "gst_video_encoder_finish_frame (ret=%d)", ret);
+      }
 
     }
     else if (ret == XEVE_OK_NO_MORE_FRM)
@@ -798,7 +802,7 @@ gst_xeve_enc_handle_frame(GstVideoEncoder *encoder, GstVideoCodecFrame *frame)
     }
     else
     {      
-      GST_INFO_OBJECT(self, "XEVE_OK (err=%d)", err);
+      GST_INFO_OBJECT(self, "XEVE_OK (err=%d)", ret);
     }
 
     return ret;
