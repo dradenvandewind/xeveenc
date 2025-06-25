@@ -19,6 +19,8 @@ struct _GstXeveEnc {
   
   /* Properties */
 
+  gint bit_depth;
+
   gint width;
   gint height;
   gint fps_n;

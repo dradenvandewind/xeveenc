@@ -143,6 +143,7 @@ typedef struct {
   XEVE_CDSC *xeve_cdsc;        // Pointer instead of direct structure
   gboolean encoder_initialized;
   GstVideoCodecState *input_state;
+  gint frame_number;
 } GstXeveEncPrivate;
 
 #define GST_XEVE_ENC_GET_PRIVATE(obj) \
@@ -269,6 +270,7 @@ gst_xeve_enc_init(GstXeveEnc *self)
   priv->xeve_handle = NULL;
   priv->input_state = NULL;
   priv->encoder_initialized = FALSE;
+  priv->frame_number = 0;
 
   // Secure allocation  
   priv->xeve_cdsc = g_malloc0(sizeof(XEVE_CDSC));
@@ -455,7 +457,7 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
   priv->xeve_cdsc->param.fps.den = fps_d;
 
 
-
+#if 0
   // Color format configuration
   switch (GST_VIDEO_INFO_FORMAT(info)) {
     case GST_VIDEO_FORMAT_I420:
@@ -469,6 +471,42 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
                        gst_video_format_to_string(GST_VIDEO_INFO_FORMAT(info)));
       return FALSE;
   }
+# else
+  // Color format configuration
+  switch (GST_VIDEO_INFO_FORMAT(info)) {
+    case GST_VIDEO_FORMAT_I420:
+      priv->xeve_cdsc->param.cs = XEVE_CS_SET(XEVE_CS_YCBCR420, priv->xeve_cdsc->param.codec_bit_depth, 0);
+      self->bit_depth = 8;
+      break;
+    case GST_VIDEO_FORMAT_Y42B:
+      priv->xeve_cdsc->param.cs = XEVE_CS_SET(XEVE_CF_YCBCR422, priv->xeve_cdsc->param.codec_bit_depth, 0);
+      self->bit_depth = 8;
+      break;
+    case GST_VIDEO_FORMAT_Y444:
+      priv->xeve_cdsc->param.cs = XEVE_CS_SET(XEVE_CF_YCBCR444, priv->xeve_cdsc->param.codec_bit_depth, 0);
+      self->bit_depth = 8;
+      break;
+    case GST_VIDEO_FORMAT_I420_10LE:
+      priv->xeve_cdsc->param.cs = XEVE_CS_SET(XEVE_CF_YCBCR420, priv->xeve_cdsc->param.codec_bit_depth, 0);
+      self->bit_depth = 10;
+      break;
+    case GST_VIDEO_FORMAT_I422_10LE:
+      priv->xeve_cdsc->param.cs = XEVE_CS_SET(XEVE_CF_YCBCR422, priv->xeve_cdsc->param.codec_bit_depth, 0);
+      self->bit_depth = 10;
+      break;
+    case GST_VIDEO_FORMAT_Y444_10LE:
+      priv->xeve_cdsc->param.cs = XEVE_CS_SET(XEVE_CF_YCBCR444, priv->xeve_cdsc->param.codec_bit_depth, 0);
+      self->bit_depth = 10;
+      break;
+    default:
+      GST_ERROR_OBJECT(self, "Unsupported input format: %s", 
+                       gst_video_format_to_string(GST_VIDEO_INFO_FORMAT(info)));
+      return FALSE;
+  } 
+
+
+#endif
+
 
   // Clean the existing encoder
   if (priv->xeve_handle) {
@@ -769,14 +807,17 @@ gst_xeve_enc_handle_frame(GstVideoEncoder *encoder, GstVideoCodecFrame *frame)
     if(ret == XEVE_OK_OUT_NOT_AVAILABLE)
     {
       
-      GST_INFO_OBJECT(self, "XEVE_OK_OUT_NOT_AVAILABLE (ret=%d)", ret);
-      GST_INFO_OBJECT(self, "progress success, but output is not available temporarily (ret=%d)", ret);
+      //GST_INFO_OBJECT(self, "XEVE_OK_OUT_NOT_AVAILABLE (ret=%d)", ret);
+      GST_DEBUG_OBJECT(self, "progress success, but output is not available temporarily (ret=%d)", ret);
+      // We can't write this frame in output bitstream
+
       ret = 0;
       //continue;
     }
     else if(ret == XEVE_OK)
     {
-      GST_INFO_OBJECT(self, "XEVE_OK (ret=%d)", ret);
+      
+      //GST_INFO_OBJECT(self, "XEVE_OK (ret=%d)", ret);
       GST_INFO_OBJECT(self, "actual encoded size (size=%d)", stat.write);
 
       if(stat.write > 0)
@@ -790,7 +831,10 @@ gst_xeve_enc_handle_frame(GstVideoEncoder *encoder, GstVideoCodecFrame *frame)
         frame->pts = GST_BUFFER_PTS (frame->input_buffer);
         frame->duration = GST_BUFFER_DURATION (frame->input_buffer);
         ret = gst_video_encoder_finish_frame(encoder, frame);
-        GST_INFO_OBJECT(self, "gst_video_encoder_finish_frame (ret=%d)", ret);
+        GST_DEBUG_OBJECT(self, "gst_video_encoder_finish_frame (ret=%d)", ret);
+        priv->frame_number++;
+        GST_DEBUG_OBJECT(self, " frame inc to bitstream %d)", priv->frame_number);
+
       }
 
     }
