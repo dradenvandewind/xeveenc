@@ -356,6 +356,11 @@ gst_xeve_enc_dispose(GObject *object)
     priv->xeve_cdsc = NULL;
   }
 
+  if (self->imgb_rec) {
+    imgb_free(self->imgb_rec);
+    self->imgb_rec = NULL;
+  }
+
   priv->encoder_initialized = FALSE;
 
   G_OBJECT_CLASS(gst_xeve_enc_parent_class)->dispose(object);
@@ -506,6 +511,13 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
 
 
 #endif
+#if 1
+  self->imgb_rec = imgb_alloc(width, height, priv->xeve_cdsc->param.cs);
+  if (!self->imgb_rec) {
+    imgb_free(self->imgb_rec);
+    self->imgb_rec = NULL;
+  }      
+#endif 
 
 
   // Clean the existing encoder
@@ -608,7 +620,7 @@ priv->xeve_cdsc->param.threads = 8;
 
   return TRUE;
 }
-
+#if 0
 int gstbuffer_to_xeve_imgb(GstBuffer *gst_buffer, GstVideoInfo *video_info, XEVE_IMGB *imgb)
 {
     GstMapInfo map_info;
@@ -714,6 +726,221 @@ for (int i = 0; i < imgb->np; i++) {
     
     return 0;
 }
+#else 
+
+int gstbuffer_to_xeve_imgb(GstBuffer *gst_buffer, GstVideoInfo *video_info, XEVE_IMGB *imgb, gint in_chromat_format, gint in_bit_depth)
+{
+    GstMapInfo map;
+    guint8 *data;
+
+    gint y_stride, u_stride, v_stride;
+    gsize y_offset, u_offset, v_offset;
+    gsize y_size;
+    gsize u_size;
+    gsize v_size;
+    gint width;
+    gint height;
+
+
+
+    gint chroma_format = XEVE_CS_GET_FORMAT(in_chromat_format);
+    gint bit_depth = in_bit_depth;
+    //XEVE_CS_GET_BIT_DEPTH(in_chromat_format);
+    gint w_shift = (chroma_format == XEVE_CF_YCBCR420) || (chroma_format == XEVE_CF_YCBCR422) ? 1 : 0;
+    gint h_shift = chroma_format == XEVE_CF_YCBCR420 ? 1 : 0;
+
+        
+    if (!gst_buffer || !video_info || !imgb) {
+        return -1;
+    }
+   // Map the GStreamer buffer
+  if (!gst_buffer_map(gst_buffer, &map, GST_MAP_READ)) {
+      g_print("we can't map buffer\n");
+      return -1;
+  }
+
+    width = GST_VIDEO_INFO_WIDTH(video_info);
+    height = GST_VIDEO_INFO_HEIGHT(video_info);
+    
+    // Get strides and offsets for each plane
+    y_stride = GST_VIDEO_INFO_PLANE_STRIDE(video_info, 0);
+    u_stride = GST_VIDEO_INFO_PLANE_STRIDE(video_info, 1);
+    v_stride = GST_VIDEO_INFO_PLANE_STRIDE(video_info, 2);
+    
+    y_offset = GST_VIDEO_INFO_PLANE_OFFSET(video_info, 0);
+    u_offset = GST_VIDEO_INFO_PLANE_OFFSET(video_info, 1);
+    v_offset = GST_VIDEO_INFO_PLANE_OFFSET(video_info, 2);
+
+  #if DEBUG
+
+  g_print("chroma_format %d bit_depth %d w_shift %d h_shift %d n",chroma_format, bit_depth, w_shift, h_shift );
+
+  #endif
+
+// Initialize the XEVE_IMGB structure
+//memset(imgb, 0, sizeof(XEVE_IMGB));
+
+#if 0
+// Set the color space according to the GStreamer format
+switch (GST_VIDEO_INFO_FORMAT(video_info)) {
+    case GST_VIDEO_FORMAT_I420:
+    case GST_VIDEO_FORMAT_YV12:
+        imgb->cs = 0; // YUV420 (value to be adjusted according to XEVE)
+        imgb->np = 3; // Y, U, V planes
+        break;
+    case GST_VIDEO_FORMAT_NV12:
+        imgb->cs = 1; // NV12 (value to be adjusted according to XEVE)
+        imgb->np = 2; // Y, UV planes
+        break;
+    case GST_VIDEO_FORMAT_RGB:
+    case GST_VIDEO_FORMAT_BGR:
+        imgb->cs = 2; // RGB (value to be adjusted according to XEVE)
+        imgb->np = 1; // Single plane
+        break;
+    default:
+        gst_buffer_unmap(gst_buffer, &map_info);
+        return -2; // Unsupported format
+}
+#else 
+
+// Set the color space according to the GStreamer format
+switch (GST_VIDEO_INFO_FORMAT(video_info)) {
+    case GST_VIDEO_FORMAT_I420:
+    case GST_VIDEO_FORMAT_YV12:
+        imgb->cs = 0; // YUV420 (value to be adjusted according to XEVE)
+        imgb->np = 3; // Y, U, V planes
+        break;
+    case GST_VIDEO_FORMAT_NV12:
+        imgb->cs = 1; // NV12 (value to be adjusted according to XEVE)
+        imgb->np = 2; // Y, UV planes
+        break;
+    default:
+        gst_buffer_unmap(gst_buffer, &map);
+        return -2; // Unsupported format
+}
+
+#if 1
+    // Calculate plane sizes
+    switch (GST_VIDEO_INFO_FORMAT(video_info)) {
+        case GST_VIDEO_FORMAT_I420:
+        case GST_VIDEO_FORMAT_YV12:
+            y_size = height * y_stride;
+            u_size = (height / 2) * u_stride;
+            v_size = (height / 2) * v_stride;
+            imgb->cs = 0; // YUV420 (value to be adjusted according to XEVE)
+            imgb->np = 3; // Y, U, V planes
+            break;
+        case GST_VIDEO_FORMAT_Y42B:
+            y_size = height * y_stride;
+            u_size = height * u_stride;
+            v_size = height * v_stride;
+            break;
+        case GST_VIDEO_FORMAT_Y444:
+            y_size = height * y_stride;
+            u_size = height * u_stride;
+            v_size = height * v_stride;
+            break;
+        default:
+            g_warning("Unsupported YUV format");
+            gst_buffer_unmap(gst_buffer, &map);
+            return FALSE;
+    }
+#else
+
+
+#endif
+
+
+#endif
+
+
+
+// Fill in the information for each plane
+data = map.data;
+// gsize offset = 0;
+
+for (int i = 0; i < imgb->np; i++) {
+    // Compute the dimensions of the plane according to the format
+    if (i == 0) { // Y plane or RGB
+        imgb->w[i] = GST_VIDEO_INFO_WIDTH(video_info);
+        imgb->h[i] = GST_VIDEO_INFO_HEIGHT(video_info);
+    } else { // U/V planes for YUV formats
+        switch (GST_VIDEO_INFO_FORMAT(video_info)) {
+            case GST_VIDEO_FORMAT_I420:
+            case GST_VIDEO_FORMAT_YV12:
+                imgb->w[i] = GST_VIDEO_INFO_WIDTH(video_info) / 2;
+                imgb->h[i] = GST_VIDEO_INFO_HEIGHT(video_info) / 2;
+                break;
+            case GST_VIDEO_FORMAT_NV12:
+                if (i == 1) { // UV plane
+                    imgb->w[i] = GST_VIDEO_INFO_WIDTH(video_info);
+                    imgb->h[i] = GST_VIDEO_INFO_HEIGHT(video_info) / 2;
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    //Copies entire planes including any padding bytes. This is faster but may include stride padding.
+    // Copy Y plane
+    memcpy(imgb->a[0], data + y_offset, y_size);
+    
+    // Copy U plane
+    memcpy(imgb->a[1], data + u_offset, u_size);
+    
+    // Copy V plane
+    memcpy(imgb->a[2], data + v_offset, v_size);
+
+
+
+
+    // Position (usually 0,0 for the full frame)
+    imgb->x[i] = 0;
+    imgb->y[i] = 0;
+
+    // Compute the stride
+    imgb->s[i] = GST_VIDEO_INFO_PLANE_STRIDE(video_info, i);
+
+    // Data address of the plane with offset
+    imgb->a[i] = data + GST_VIDEO_INFO_PLANE_OFFSET(video_info, i);
+
+    // Aligned dimensions (often identical to normal dimensions)
+    imgb->aw[i] = imgb->w[i];
+    imgb->ah[i] = imgb->h[i];
+
+    // Padding (usually 0 if no specific padding)
+    imgb->padl[i] = 0;
+    imgb->padr[i] = 0;
+    imgb->padu[i] = 0;
+    imgb->padb[i] = 0;
+
+    // Buffer address and size
+    imgb->baddr[i] = imgb->a[i];
+    imgb->bsize[i] = imgb->s[i] * imgb->h[i];
+}
+ 
+    // Timestamps
+    if (GST_BUFFER_PTS_IS_VALID(gst_buffer)) {
+        imgb->ts[0] = GST_BUFFER_PTS(gst_buffer);
+    }
+    if (GST_BUFFER_DTS_IS_VALID(gst_buffer)) {
+        imgb->ts[1] = GST_BUFFER_DTS(gst_buffer);
+    }
+    
+    // Gestion du cycle de vie
+    imgb->refcnt = 1;
+    
+    // Note: Ne pas unmapper le buffer ici car XEVE_IMGB pointe vers ses données
+    // Le unmap devra être fait après utilisation de imgb
+    
+    return 0;
+}
+
+
+
+
+#endif
 
 #if 0
 typedef struct {
@@ -759,13 +986,13 @@ gst_xeve_enc_handle_frame(GstVideoEncoder *encoder, GstVideoCodecFrame *frame)
     int err;
     GstMapInfo in_map, out_map;
     // Convert GstBuffer to XEVE_IMGB using the helper function
-    if (gstbuffer_to_xeve_imgb(frame->input_buffer, info, &img_buf) != 0) {
+    if (gstbuffer_to_xeve_imgb(frame->input_buffer, info, self->imgb_rec, priv->xeve_cdsc->param.cs, self->bit_depth) != 0) {
         GST_ERROR_OBJECT(self, "Failed to convert GstBuffer to XEVE_IMGB");
         goto done;
     }
 
     // Push frame to encoder
-    err = xeve_push(priv->xeve_handle, &img_buf);
+    err = xeve_push(priv->xeve_handle, self->imgb_rec);
     if(XEVE_FAILED(err))
     {
       GST_ERROR_OBJECT(self, "xeve_push() Failed to push frame to encoder (err=%d)", err);

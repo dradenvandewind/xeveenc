@@ -5,6 +5,7 @@
 #include <gst/video/video.h>
 #include <gst/video/gstvideoencoder.h>
 #include <xeve.h>
+#include <xeve_app_util.h> 
 
 #define DEBUG TRUE
 #define MAX_BITSTREAM_SIZE (10*1000*1000)
@@ -20,7 +21,7 @@ struct _GstXeveEnc {
   /* Properties */
 
   gint bit_depth;
-
+  
   gint width;
   gint height;
   gint fps_n;
@@ -35,6 +36,8 @@ struct _GstXeveEnc {
   gboolean closed_gop;
   gint keyint_max;
   gboolean annexb;
+  XEVE_IMGB *imgb_rec;
+
 
   /*< private >*/
   gpointer priv;

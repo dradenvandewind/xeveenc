@@ -34,6 +34,8 @@ xeve_dep = cc.find_library('xeve',
 # Configuration des includes
 xeve_inc = include_directories(xeve_inc_dirs)
 
+mathlib = cc.find_library('m', required: true)
+
 # Vérification du header
 if not cc.has_header('xeve.h')
   error('xeve.h header not found. Please install libxeve-dev or check installation path')
@@ -53,7 +55,7 @@ c_args = [
 shared_library('gstxeveenc',
   plugin_sources,
   c_args : c_args,
-  dependencies : [gst_dep, gstvideo_dep, xeve_dep],
+  dependencies : [gst_dep, gstvideo_dep, xeve_dep, mathlib],
   include_directories : xeve_inc,
   install : true,
   install_dir : join_paths(get_option('libdir'), 'gstreamer-1.0'),
