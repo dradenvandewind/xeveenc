@@ -741,6 +741,8 @@ int gstbuffer_to_xeve_imgb(GstBuffer *gst_buffer, GstVideoInfo *video_info, XEVE
     gint width;
     gint height;
 
+    guint8 *src_data, *dst_data;
+
 
 
     gint chroma_format = XEVE_CS_GET_FORMAT(in_chromat_format);
@@ -847,6 +849,30 @@ switch (GST_VIDEO_INFO_FORMAT(video_info)) {
     }
 #else
 
+// Calculate actual data sizes (without padding)
+    switch (GST_VIDEO_INFO_FORMAT(video_info)) {
+        case GST_VIDEO_FORMAT_I420:
+        case GST_VIDEO_FORMAT_YV12:
+            y_size = height * width;
+            u_size = (height / 2) * (width / 2);
+            v_size = (height / 2) * (width / 2);
+            break;
+        case GST_VIDEO_FORMAT_Y42B:
+            y_size = height * width;
+            u_size = height * (width / 2);
+            v_size = height * (width / 2);
+            break;
+        case GST_VIDEO_FORMAT_Y444:
+            y_size = height * width;
+            u_size = height * width;
+            v_size = height * width;
+            break;
+        default:
+            g_warning("Unsupported YUV format");
+            gst_buffer_unmap(gst_buffer, &map);
+            return FALSE;
+    }
+
 
 #endif
 
@@ -881,6 +907,7 @@ for (int i = 0; i < imgb->np; i++) {
                 break;
         }
     }
+#if 1
 
     //Copies entire planes including any padding bytes. This is faster but may include stride padding.
     // Copy Y plane
@@ -891,7 +918,36 @@ for (int i = 0; i < imgb->np; i++) {
     
     // Copy V plane
     memcpy(imgb->a[2], data + v_offset, v_size);
+#else
 
+// Copy Y plane line by line (handle stride properly)
+    dst_data = imgb->a[0];
+    for (i = 0; i < height; i++) {
+        memcpy(imgb->a[0], data + y_offset + (i * y_stride), width);
+        imgb->a[0] += width;
+    }
+    // Copy U plane line by line
+gint u_height = (GST_VIDEO_INFO_FORMAT(video_info) == GST_VIDEO_FORMAT_I420 || 
+                     GST_VIDEO_INFO_FORMAT(video_info) == GST_VIDEO_FORMAT_YV12) ? height / 2 : height;
+gint u_width = (GST_VIDEO_INFO_FORMAT(video_info) == GST_VIDEO_FORMAT_Y444) ? width : width / 2;
+    dst_data = imgb->a[1];
+    for (i = 0; i < u_height; i++) {
+        memcpy(imgb->a[1], data + u_offset + (i * u_stride), u_width);
+        imgb->a[1] += u_width;
+    }
+// Copy V plane line by line
+  
+    gint v_height = (GST_VIDEO_INFO_FORMAT(video_info) == GST_VIDEO_FORMAT_I420 || 
+                     GST_VIDEO_INFO_FORMAT(video_info) == GST_VIDEO_FORMAT_YV12) ? height / 2 : height;
+    gint v_width = (GST_VIDEO_INFO_FORMAT(video_info) == GST_VIDEO_FORMAT_Y444) ? width : width / 2;
+    dst_data = imgb->a[2];
+    for (i = 0; i < v_height; i++) {
+        memcpy(imgb->a[2], data + v_offset + (i * v_stride), v_width);
+        imgb->a[2] += v_width;
+    }
+
+
+#endif
 
 
 
