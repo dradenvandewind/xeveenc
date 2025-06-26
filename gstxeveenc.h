@@ -7,6 +7,9 @@
 #include <xeve.h>
 #include <xeve_app_util.h> 
 
+
+#define ALIGN_VAL(val, align)  ((((val)+(align)-1)/(align))*(align))
+
 #define DEBUG TRUE
 #define MAX_BITSTREAM_SIZE (10*1000*1000)
 
