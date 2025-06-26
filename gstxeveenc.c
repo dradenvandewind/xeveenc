@@ -969,6 +969,8 @@ int gstbuffer_to_xeve_imgb_new(FILE *file, FILE *fileY, FILE *fileU,
                 break;
         }
 #else
+
+/*
     // Get source plane info
     switch (i) {
     case 0: // Y plane
@@ -995,55 +997,74 @@ int gstbuffer_to_xeve_imgb_new(FILE *file, FILE *fileY, FILE *fileU,
       copy_width = width / 2;
       break;
     }
-
+*/
 #endif
-    dst_plane = imgb->a[i];
-    dst_stride = imgb->s[i];
 
-    // Vérification de sécurité
-    if (!src_plane || !dst_plane) {
-      GST_ERROR("Invalid plane pointer for plane %d", i);
-      gst_buffer_unmap(gst_buffer, &map);
-      return -3;
-    }
+    /*
+        dst_plane = imgb->a[i];
+        dst_stride = imgb->s[i];
 
-    // Copy line by line to handle stride differences
-    for (int y = 0; y < imgb->h[i]; y++) {
-      // Vérification des limites pour éviter le débordement
-      if ((src_plane + y * src_stride + copy_width) > (src_data + map.size)) {
-        GST_ERROR("Copy would exceed buffer bounds for plane %d, line %d", i,
-                  y);
-        gst_buffer_unmap(gst_buffer, &map);
-        return -4;
+        // Vérification de sécurité
+        if (!src_plane || !dst_plane) {
+          GST_ERROR("Invalid plane pointer for plane %d", i);
+          gst_buffer_unmap(gst_buffer, &map);
+          return -3;
+        }
+
+        // Copy line by line to handle stride differences
+        for (int y = 0; y < imgb->h[i]; y++) {
+          // Vérification des limites pour éviter le débordement
+          if ((src_plane + y * src_stride + copy_width) > (src_data + map.size))
+       { GST_ERROR("Copy would exceed buffer bounds for plane %d, line %d", i,
+                      y);
+            gst_buffer_unmap(gst_buffer, &map);
+            return -4;
+          }
+
+          memcpy(dst_plane + y * dst_stride, src_plane + y * src_stride,
+                 copy_width);
+        }
+    */
+
+    /*
+      //  do in imgb_alloc funct
+
+
+        // Set other imgb fields
+        imgb->x[i] = imgb->y[i] = 0;
+        imgb->aw[i] = imgb->w[i];
+        imgb->ah[i] = imgb->h[i];
+        imgb->padl[i] = imgb->padr[i] = imgb->padu[i] = imgb->padb[i] = 0;
+        imgb->baddr[i] = imgb->a[i];
+        imgb->bsize[i] = imgb->s[i] * imgb->h[i];
       }
 
-      memcpy(dst_plane + y * dst_stride, src_plane + y * src_stride,
-             copy_width);
+      */
+
+    // Copie du plan Y
+    memcpy(imgb->a[0], map_Y.data, map_Y.size);
+
+    // Copie du plan U
+    memcpy(imgb->a[1], map_U.data, map_U.size);
+
+    // Copie du plan V
+    memcpy(imgb->a[2], map_V.data, map_V.size);
+
+    // Set timestamps
+    if (GST_BUFFER_PTS_IS_VALID(gst_buffer)) {
+      imgb->ts[0] = GST_BUFFER_PTS(gst_buffer);
+    }
+    if (GST_BUFFER_DTS_IS_VALID(gst_buffer)) {
+      imgb->ts[1] = GST_BUFFER_DTS(gst_buffer);
     }
 
-    // Set other imgb fields
-    imgb->x[i] = imgb->y[i] = 0;
-    imgb->aw[i] = imgb->w[i];
-    imgb->ah[i] = imgb->h[i];
-    imgb->padl[i] = imgb->padr[i] = imgb->padu[i] = imgb->padb[i] = 0;
-    imgb->baddr[i] = imgb->a[i];
-    imgb->bsize[i] = imgb->s[i] * imgb->h[i];
+    imgb->refcnt = 1;
+
+    // Unmap the buffer now that we've copied the data
+    gst_buffer_unmap(gst_buffer, &map);
+
+    return 0;
   }
-
-  // Set timestamps
-  if (GST_BUFFER_PTS_IS_VALID(gst_buffer)) {
-    imgb->ts[0] = GST_BUFFER_PTS(gst_buffer);
-  }
-  if (GST_BUFFER_DTS_IS_VALID(gst_buffer)) {
-    imgb->ts[1] = GST_BUFFER_DTS(gst_buffer);
-  }
-
-  imgb->refcnt = 1;
-
-  // Unmap the buffer now that we've copied the data
-  gst_buffer_unmap(gst_buffer, &map);
-
-  return 0;
 }
 #else
 int gstbuffer_to_xeve_imgb_new(GstBuffer *gst_buffer, GstVideoInfo *video_info,
