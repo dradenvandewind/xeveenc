@@ -40,6 +40,8 @@ struct _GstXeveEnc {
   gint keyint_max;
   gboolean annexb;
   XEVE_IMGB *imgb_rec;
+  FILE          *fp,*fp_Y,*fp_U,*fp_V;
+
 
 
   /*< private >*/

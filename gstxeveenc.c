@@ -360,6 +360,24 @@ gst_xeve_enc_dispose(GObject *object)
     imgb_free(self->imgb_rec);
     self->imgb_rec = NULL;
   }
+  if (self->fp) {
+    fclose(self->fp);
+    self->fp = NULL;
+  }
+  if(self->fp_Y) {
+    fclose(self->fp_Y);
+    self->fp_Y = NULL;
+  }
+  if(self->fp_U) {
+    fclose(self->fp_U);
+    self->fp_U = NULL;
+  }
+  if(self->fp_V) {
+    fclose(self->fp_V);
+    self->fp_V = NULL;
+  }
+
+
 
   priv->encoder_initialized = FALSE;
 
@@ -518,6 +536,36 @@ gst_xeve_enc_set_format(GstVideoEncoder *encoder, GstVideoCodecState *state)
     self->imgb_rec = NULL;
   }      
 #endif 
+ self->fp = fopen("dumpbuf.yuv", "ab");
+ if (self->fp == NULL) {
+    GST_ERROR_OBJECT(self, "Failed to open dump file");
+    return FALSE;
+  } else {
+    GST_INFO_OBJECT(self, "Dump file opened successfully");
+  }
+  self->fp_Y = fopen("dumpbuf_Y.yuv", "ab");
+  if (self->fp_Y == NULL) {
+    GST_ERROR_OBJECT(self, "Failed to open Y dump file");
+    return FALSE;
+  } else {
+    GST_INFO_OBJECT(self, "Y dump file opened successfully");
+  }
+  self->fp_U = fopen("dumpbuf_U.yuv", "ab");
+  if (self->fp_U == NULL) {
+    GST_ERROR_OBJECT(self, "Failed to open U dump file");
+    return FALSE;
+  } else {
+    GST_INFO_OBJECT(self, "U dump file opened successfully");
+  }
+  self->fp_V = fopen("dumpbuf_V.yuv", "ab");
+  if (self->fp_V == NULL) {
+    GST_ERROR_OBJECT(self, "Failed to open V dump file");
+    return FALSE;
+  } else {
+    GST_INFO_OBJECT(self, "V dump file opened successfully");
+  }
+  
+
 
 
   // Clean the existing encoder
@@ -710,16 +758,133 @@ static int buffertoimgb(GstBuffer *buffer, XEVE_IMGB *img, int width, int height
     return 0;
 }
 #endif 
+#if 1
 
+typedef struct {
+    GstBuffer *y_buffer;
+    GstBuffer *u_buffer;
+    GstBuffer *v_buffer;
+} I420Planes;
+
+I420Planes extract_i420_planes(GstBuffer *buffer, GstVideoInfo *info) {
+    I420Planes planes = {NULL, NULL, NULL};
+    GstMapInfo map;
+    
+    // Verify format is I420
+    if (GST_VIDEO_INFO_FORMAT(info) != GST_VIDEO_FORMAT_I420) {
+        GST_ERROR("Buffer is not in I420 format");
+        return planes;
+    }
+
+    // Map the source buffer
+    if (!gst_buffer_map(buffer, &map, GST_MAP_READ)) {
+        GST_ERROR("Failed to map source buffer");
+        return planes;
+    }
+
+    // Get video dimensions
+    const guint width = GST_VIDEO_INFO_WIDTH(info);
+    const guint height = GST_VIDEO_INFO_HEIGHT(info);
+    
+    // Calculate plane sizes (I420 has 2x2 chroma subsampling)
+    const gsize y_size = width * height;
+    const gsize uv_size = (width / 2) * (height / 2);
+    
+    // Get strides
+    const gsize y_stride = GST_VIDEO_INFO_PLANE_STRIDE(info, 0);
+    const gsize u_stride = GST_VIDEO_INFO_PLANE_STRIDE(info, 1);
+    const gsize v_stride = GST_VIDEO_INFO_PLANE_STRIDE(info, 2);
+    
+    // Get plane offsets (more reliable than assuming layout)
+    const gsize y_offset = GST_VIDEO_INFO_PLANE_OFFSET(info, 0);
+    const gsize u_offset = GST_VIDEO_INFO_PLANE_OFFSET(info, 1);
+    const gsize v_offset = GST_VIDEO_INFO_PLANE_OFFSET(info, 2);
+    
+    // Get plane pointers
+    guint8 *y_src = map.data + y_offset;
+    guint8 *u_src = map.data + u_offset;
+    guint8 *v_src = map.data + v_offset;
+
+    // Create destination buffers
+    planes.y_buffer = gst_buffer_new_allocate(NULL, y_size, NULL);
+    planes.u_buffer = gst_buffer_new_allocate(NULL, uv_size, NULL);
+    planes.v_buffer = gst_buffer_new_allocate(NULL, uv_size, NULL);
+    
+    // Map destination buffers
+    GstMapInfo y_map, u_map, v_map;
+    if (gst_buffer_map(planes.y_buffer, &y_map, GST_MAP_WRITE) &&
+        gst_buffer_map(planes.u_buffer, &u_map, GST_MAP_WRITE) &&
+        gst_buffer_map(planes.v_buffer, &v_map, GST_MAP_WRITE)) {
+        
+        // Copy Y plane (handle stride if needed)
+        for (guint i = 0; i < height; i++) {
+            memcpy(y_map.data + i * width, 
+                   y_src + i * y_stride,
+                   width);
+        }
+        
+        // Copy U plane (chroma is subsampled)
+        for (guint i = 0; i < height/2; i++) {
+            memcpy(u_map.data + i * (width/2),
+                   u_src + i * u_stride,
+                   width/2);
+        }
+        
+        // Copy V plane (chroma is subsampled)
+        for (guint i = 0; i < height/2; i++) {
+            memcpy(v_map.data + i * (width/2),
+                   v_src + i * v_stride,
+                   width/2);
+        }
+        
+        // Unmap destination buffers
+        gst_buffer_unmap(planes.u_buffer, &u_map);
+        gst_buffer_unmap(planes.v_buffer, &v_map);
+        gst_buffer_unmap(planes.y_buffer, &y_map);
+    } else {
+        // Cleanup if mapping failed
+        GST_ERROR("Failed to map destination buffers");
+        gst_buffer_unref(planes.y_buffer);
+        gst_buffer_unref(planes.u_buffer);
+        gst_buffer_unref(planes.v_buffer);
+        planes.y_buffer = planes.u_buffer = planes.v_buffer = NULL;
+    }
+    
+    // Unmap source buffer
+    gst_buffer_unmap(buffer, &map);
+    
+    return planes;
+}
+
+#endif
+
+
+
+
+
+
+#if 1
 // Fixed gstbuffer_to_xeve_imgb function
-int gstbuffer_to_xeve_imgb_new(GstBuffer *gst_buffer, GstVideoInfo *video_info, 
+int gstbuffer_to_xeve_imgb_new(FILE *file, FILE *fileY,FILE *fileU,FILE *fileV, GstBuffer *gst_buffer, GstVideoInfo *video_info, 
                           XEVE_IMGB *imgb, gint in_chroma_format, gint in_bit_depth)
 {
-    GstMapInfo map;
+    GstMapInfo map,map_Y, map_U, map_V;
+
     guint8 *src_data;
     gint width, height;
     gint y_stride, u_stride, v_stride;
     gsize y_offset, u_offset, v_offset;
+    gint bytes_per_pixel;
+
+    GstBuffer *tmp_gst_buffer;
+
+    tmp_gst_buffer = gst_buffer_copy_region(gst_buffer, 
+                                       GST_BUFFER_COPY_ALL,
+                                       0, // offset
+                                       gst_buffer_get_size(gst_buffer));
+
+
+
     
     if (!gst_buffer || !video_info || !imgb) {
         return -1;
@@ -731,9 +896,64 @@ int gstbuffer_to_xeve_imgb_new(GstBuffer *gst_buffer, GstVideoInfo *video_info,
         return -1;
     }
 
+    I420Planes planes = extract_i420_planes(tmp_gst_buffer, video_info);
+
+if (planes.y_buffer && planes.u_buffer && planes.v_buffer) {
+    // Use the separated planes...
+
+    // Map the GStreamer buffer for reading
+    if (!gst_buffer_map(planes.y_buffer, &map_Y, GST_MAP_READ)) {
+        GST_ERROR("Failed to map input buffer");
+        return -1;
+    }
+
+    // Map the GStreamer buffer for reading
+    if (!gst_buffer_map(planes.u_buffer, &map_U, GST_MAP_READ)) {
+        GST_ERROR("Failed to map input buffer");
+        return -1;
+    }
+
+    // Map the GStreamer buffer for reading
+    if (!gst_buffer_map(planes.v_buffer, &map_V, GST_MAP_READ)) {
+        GST_ERROR("Failed to map input buffer");
+        return -1;
+    }
+
+     if(file) {
+      fwrite(map_Y.data,map_Y.size, 1, fileY);        
+    }
+
+     if(file) {
+      fwrite(map_U.data,map_U.size, 1, fileU);        
+    }
+
+     if(file) {
+      fwrite(map_V.data,map_V.size, 1, fileV);        
+    }
+
+
+
+
+
+    
+    // Remember to unref when done
+    gst_buffer_unref(planes.y_buffer);
+    gst_buffer_unref(planes.u_buffer);
+    gst_buffer_unref(planes.v_buffer);
+}
+
+
+
     width = GST_VIDEO_INFO_WIDTH(video_info);
     height = GST_VIDEO_INFO_HEIGHT(video_info);
     src_data = map.data;
+
+    if(file) {
+      fwrite(map.data,map.size, 1, file);        
+    }
+
+
+    bytes_per_pixel = 1;
 
     // Get plane information from GStreamer
     y_stride = GST_VIDEO_INFO_PLANE_STRIDE(video_info, 0);
@@ -754,7 +974,7 @@ int gstbuffer_to_xeve_imgb_new(GstBuffer *gst_buffer, GstVideoInfo *video_info,
             // U and V planes
             imgb->w[1] = imgb->w[2] = width / 2;
             imgb->h[1] = imgb->h[2] = height / 2;
-            imgb->s[1] = imgb->s[2] = ALIGN_VAL(width / 2, 16);
+            imgb->s[1] = imgb->s[2] = ALIGN_VAL((width / 2), 16);
             
             u_stride = GST_VIDEO_INFO_PLANE_STRIDE(video_info, 1);
             v_stride = GST_VIDEO_INFO_PLANE_STRIDE(video_info, 2);
@@ -790,7 +1010,7 @@ int gstbuffer_to_xeve_imgb_new(GstBuffer *gst_buffer, GstVideoInfo *video_info,
     for (int i = 0; i < imgb->np; i++) {
         gint src_stride, dst_stride, copy_width;
         guint8 *src_plane, *dst_plane;
-        
+#if 0        
         // Get source plane info
         switch (i) {
             case 0: // Y plane
@@ -809,12 +1029,250 @@ int gstbuffer_to_xeve_imgb_new(GstBuffer *gst_buffer, GstVideoInfo *video_info,
                 copy_width = width / 2;
                 break;
         }
+#else
+// Get source plane info
+        switch (i) {
+            case 0: // Y plane
+                src_stride = y_stride;
+                src_plane = src_data + y_offset;
+                copy_width = width * bytes_per_pixel;
+                // Vérification pour éviter le débordement
+                if (copy_width > src_stride) {
+                    copy_width = src_stride;
+                }
+                break;
+            case 1: // Plan 1
+                src_stride = u_stride;
+                src_plane = src_data + u_offset;
+                if (GST_VIDEO_INFO_FORMAT(video_info) == GST_VIDEO_FORMAT_NV12) {
+                    copy_width = width; // UV entrelacé
+                } else {
+                    copy_width = width / 2; // Plans U séparés
+                }
+                break;
+            case 2: // Plan 2 (seulement pour I420/YV12)
+                src_stride = v_stride;
+                src_plane = src_data + v_offset;
+                copy_width = width / 2;
+                break;
+        }
+
+#endif
+        dst_plane = imgb->a[i];
+        dst_stride = imgb->s[i];
+        
+       // Vérification de sécurité
+        if (!src_plane || !dst_plane) {
+            GST_ERROR("Invalid plane pointer for plane %d", i);
+            gst_buffer_unmap(gst_buffer, &map);
+            return -3;
+        }
+        
+        // Copy line by line to handle stride differences
+        for (int y = 0; y < imgb->h[i]; y++) {
+            // Vérification des limites pour éviter le débordement
+            if ((src_plane + y * src_stride + copy_width) > (src_data + map.size)) {
+                GST_ERROR("Copy would exceed buffer bounds for plane %d, line %d", i, y);
+                gst_buffer_unmap(gst_buffer, &map);
+                return -4;
+            }
+            
+            memcpy(dst_plane + y * dst_stride, 
+                   src_plane + y * src_stride, 
+                   copy_width);
+            
+            
+                  
+        }
+        
+        // Set other imgb fields
+        imgb->x[i] = imgb->y[i] = 0;
+        imgb->aw[i] = imgb->w[i];
+        imgb->ah[i] = imgb->h[i];
+        imgb->padl[i] = imgb->padr[i] = imgb->padu[i] = imgb->padb[i] = 0;
+        imgb->baddr[i] = imgb->a[i];
+        imgb->bsize[i] = imgb->s[i] * imgb->h[i];
+    }
+
+    // Set timestamps
+    if (GST_BUFFER_PTS_IS_VALID(gst_buffer)) {
+        imgb->ts[0] = GST_BUFFER_PTS(gst_buffer);
+    }
+    if (GST_BUFFER_DTS_IS_VALID(gst_buffer)) {
+        imgb->ts[1] = GST_BUFFER_DTS(gst_buffer);
+    }
+    
+    imgb->refcnt = 1;
+    
+    // Unmap the buffer now that we've copied the data
+    gst_buffer_unmap(gst_buffer, &map);
+    
+    return 0;
+}
+#else
+int gstbuffer_to_xeve_imgb_new(GstBuffer *gst_buffer, GstVideoInfo *video_info, 
+                          XEVE_IMGB *imgb, gint in_chroma_format, gint in_bit_depth)
+{
+    GstMapInfo map;
+    guint8 *src_data;
+    gint width, height;
+    gint y_stride, u_stride, v_stride;
+    gsize y_offset, u_offset, v_offset;
+    gint bytes_per_pixel;
+    
+    if (!gst_buffer || !video_info || !imgb) {
+        return -1;
+    }
+
+    // Map the GStreamer buffer for reading
+    if (!gst_buffer_map(gst_buffer, &map, GST_MAP_READ)) {
+        GST_ERROR("Failed to map input buffer");
+        return -1;
+    }
+
+    width = GST_VIDEO_INFO_WIDTH(video_info);
+    height = GST_VIDEO_INFO_HEIGHT(video_info);
+    src_data = map.data;
+    
+    // Pour les formats YUV standard, bytes_per_pixel = 1
+    // Le in_bit_depth est pour la configuration XEVE, pas pour la copie GStreamer
+    bytes_per_pixel = 1;
+    
+    GST_DEBUG("Buffer size: %zu bytes", map.size);
+
+    // Get plane information from GStreamer
+    y_stride = GST_VIDEO_INFO_PLANE_STRIDE(video_info, 0);
+    y_offset = GST_VIDEO_INFO_PLANE_OFFSET(video_info, 0);
+    
+    // Debug: afficher les informations du format
+    GST_DEBUG("Format: %s, Width: %d, Height: %d", 
+              gst_video_format_to_string(GST_VIDEO_INFO_FORMAT(video_info)), width, height);
+    GST_DEBUG("Y: stride=%d, offset=%zu", y_stride, y_offset);
+    
+    // Configure imgb based on format
+    switch (GST_VIDEO_INFO_FORMAT(video_info)) {
+        case GST_VIDEO_FORMAT_I420:
+        case GST_VIDEO_FORMAT_YV12:
+            imgb->np = 3;
+            imgb->cs = in_chroma_format;
+            
+            // Y plane
+            imgb->w[0] = width;
+            imgb->h[0] = height;
+            imgb->s[0] = ALIGN_VAL(width, 16);  // XEVE alignment requirement
+            
+            // U and V planes
+            imgb->w[1] = imgb->w[2] = width / 2;
+            imgb->h[1] = imgb->h[2] = height / 2;
+            imgb->s[1] = imgb->s[2] = ALIGN_VAL(width / 2, 16);
+            
+            // Utiliser les offsets et strides de GStreamer
+            u_stride = GST_VIDEO_INFO_PLANE_STRIDE(video_info, 1);
+            v_stride = GST_VIDEO_INFO_PLANE_STRIDE(video_info, 2);
+            u_offset = GST_VIDEO_INFO_PLANE_OFFSET(video_info, 1);
+            v_offset = GST_VIDEO_INFO_PLANE_OFFSET(video_info, 2);
+            
+            // Mais aussi calculer manuellement pour comparaison
+            gsize calculated_u_offset = y_stride * height;
+            gsize calculated_v_offset = calculated_u_offset + (u_stride * height / 2);
+            
+            GST_DEBUG("I420/YV12 - GStreamer offsets: U=%zu, V=%zu", u_offset, v_offset);
+            GST_DEBUG("I420/YV12 - Calculated offsets: U=%zu, V=%zu", calculated_u_offset, calculated_v_offset);
+            
+            // Utiliser les offsets calculés si ceux de GStreamer semblent incorrects
+            if (u_offset < y_stride * height || v_offset < u_offset + (width/2) * (height/2)) {
+                GST_WARNING("GStreamer offsets seem incorrect, using calculated ones");
+                u_offset = calculated_u_offset;
+                v_offset = calculated_v_offset;
+            }
+            
+            GST_DEBUG("Final - U: stride=%d, offset=%zu, V: stride=%d, offset=%zu", 
+                      u_stride, u_offset, v_stride, v_offset);
+            break;
+            
+        case GST_VIDEO_FORMAT_NV12:
+            imgb->np = 2;
+            imgb->cs = in_chroma_format;
+            
+            // Y plane
+            imgb->w[0] = width;
+            imgb->h[0] = height;
+            imgb->s[0] = ALIGN_VAL(width, 16);
+            
+            // UV plane (entrelacé)
+            imgb->w[1] = width;
+            imgb->h[1] = height / 2;
+            imgb->s[1] = ALIGN_VAL(width, 16);
+            
+            u_stride = GST_VIDEO_INFO_PLANE_STRIDE(video_info, 1);
+            u_offset = GST_VIDEO_INFO_PLANE_OFFSET(video_info, 1);
+            
+            GST_DEBUG("NV12 - UV: stride=%d, offset=%zu", u_stride, u_offset);
+            break;
+            
+        default:
+            GST_ERROR("Unsupported format");
+            gst_buffer_unmap(gst_buffer, &map);
+            return -2;
+    }
+
+    // Copy data plane by plane with proper stride handling
+    for (int i = 0; i < imgb->np; i++) {
+        gint src_stride, dst_stride, copy_width;
+        guint8 *src_plane, *dst_plane;
+        
+        // Get source plane info
+        switch (i) {
+            case 0: // Y plane
+                src_stride = y_stride;
+                src_plane = src_data + y_offset;
+                copy_width = width;
+                // Vérification pour éviter le débordement
+                if (copy_width > src_stride) {
+                    copy_width = src_stride;
+                }
+                GST_DEBUG("Plane %d (Y): src_plane offset=%zu, copy_width=%d", 
+                          i, y_offset, copy_width);
+                break;
+            case 1: // U plane (ou UV pour NV12)
+                src_stride = u_stride;
+                src_plane = src_data + u_offset;
+                if (GST_VIDEO_INFO_FORMAT(video_info) == GST_VIDEO_FORMAT_NV12) {
+                    copy_width = width; // UV entrelacé
+                } else {
+                    copy_width = width / 2; // Plans U séparés
+                }
+                GST_DEBUG("Plane %d (U/UV): src_plane offset=%zu, copy_width=%d", 
+                          i, u_offset, copy_width);
+                break;
+            case 2: // V plane (seulement pour I420/YV12)
+                src_stride = v_stride;
+                src_plane = src_data + v_offset;
+                copy_width = width / 2;
+                GST_DEBUG("Plane %d (V): src_plane offset=%zu, copy_width=%d", 
+                          i, v_offset, copy_width);
+                break;
+        }
         
         dst_plane = imgb->a[i];
         dst_stride = imgb->s[i];
         
+        // Vérification de sécurité
+        if (!src_plane || !dst_plane) {
+            GST_ERROR("Invalid plane pointer for plane %d", i);
+            gst_buffer_unmap(gst_buffer, &map);
+            return -3;
+        }
+        
         // Copy line by line to handle stride differences
         for (int y = 0; y < imgb->h[i]; y++) {
+            // Vérification des limites pour éviter le débordement
+            if ((src_plane + y * src_stride + copy_width) > (src_data + map.size)) {
+                GST_ERROR("Copy would exceed buffer bounds for plane %d, line %d", i, y);
+                gst_buffer_unmap(gst_buffer, &map);
+                return -4;
+            }
+            
             memcpy(dst_plane + y * dst_stride, 
                    src_plane + y * src_stride, 
                    copy_width);
@@ -844,6 +1302,8 @@ int gstbuffer_to_xeve_imgb_new(GstBuffer *gst_buffer, GstVideoInfo *video_info,
     
     return 0;
 }
+#endif
+
 
 #if 0
 int gstbuffer_to_xeve_imgb(GstBuffer *gst_buffer, GstVideoInfo *video_info, XEVE_IMGB *imgb)
@@ -1274,7 +1734,7 @@ gst_xeve_enc_handle_frame(GstVideoEncoder *encoder, GstVideoCodecFrame *frame)
     }
 #else
 
-if (gstbuffer_to_xeve_imgb_new(frame->input_buffer, info, self->imgb_rec, 
+if (gstbuffer_to_xeve_imgb_new(self->fp, self->fp_Y,self->fp_U, self->fp_V,frame->input_buffer, info, self->imgb_rec, 
                               priv->xeve_cdsc->param.cs, self->bit_depth) != 0) {
         GST_ERROR_OBJECT(self, "Failed to convert GstBuffer to XEVE_IMGB");
         return GST_FLOW_ERROR;
