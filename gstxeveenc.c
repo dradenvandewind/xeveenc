@@ -1594,6 +1594,142 @@ int gstbuffer_to_xeve_imgb(GstBuffer *gst_buffer, GstVideoInfo *video_info, XEVE
     return 0;
 }
 #endif
+static int imgb_read_from_gstbuffer(GstBuffer *input_buffer,
+                                    GstVideoInfo *video_info, XEVE_IMGB *imgb,
+                                    int chromat) {
+  unsigned char *p8;
+  int i, j, bd;
+  int cs_w_off, cs_h_off;
+  GstMapInfo map_info;
+  int chroma_format = XEVE_CS_GET_FORMAT(chromat);
+  int bit_depth = XEVE_CS_GET_BIT_DEPTH(chromat);
+  int plane_width, plane_height;
+  gsize plane_offset;
+
+  GST_DEBUG("bit_depth %d bytes", bit_depth);
+
+  bit_depth = 8;
+
+  // Mapper le buffer GStreamer pour lecture
+  if (!gst_buffer_map(input_buffer, &map_info, GST_MAP_READ)) {
+    GST_ERROR("Failed to map GstBuffer for reading");
+    return -1;
+  }
+
+  // Déterminer les paramètres selon la profondeur de bits
+  if (bit_depth == 8) {
+    bd = 1;
+  } else if (bit_depth >= 10 && bit_depth <= 14) {
+    bd = 2;
+  } else {
+    GST_ERROR("Unsupported bit depth: %d", bit_depth);
+    gst_buffer_unmap(input_buffer, &map_info);
+    return -1;
+  }
+
+  // Vérifier la taille totale du buffer
+  GST_DEBUG("Buffer size: %zu bytes, expected for format: %zu bytes",
+            map_info.size, GST_VIDEO_INFO_SIZE(video_info));
+
+  // Copier les données depuis le buffer vers chaque plan de l'image XEVE
+  for (i = 0; i < imgb->np && i < GST_VIDEO_INFO_N_PLANES(video_info); i++) {
+    // Utiliser les informations du GstVideoInfo pour les dimensions et offsets
+    plane_width = GST_VIDEO_INFO_COMP_WIDTH(video_info, i);
+    plane_height = GST_VIDEO_INFO_COMP_HEIGHT(video_info, i);
+    plane_offset = GST_VIDEO_INFO_PLANE_OFFSET(video_info, i);
+
+    GST_DEBUG("Plane %d: width=%d, height=%d, offset=%zu, stride=%d", i,
+              plane_width, plane_height, plane_offset,
+              GST_VIDEO_INFO_PLANE_STRIDE(video_info, i));
+
+    // Vérifier que l'offset ne dépasse pas la taille du buffer
+    if (plane_offset >= map_info.size) {
+      GST_ERROR("Plane %d offset %zu exceeds buffer size %zu", i, plane_offset,
+                map_info.size);
+      gst_buffer_unmap(input_buffer, &map_info);
+      return -1;
+    }
+
+    // Pointer vers le début du plan dans l'image XEVE
+    p8 = (unsigned char *)imgb->a[i] + (imgb->s[i] * imgb->y[i]) +
+         (imgb->x[i] * bd);
+    // p8 = (unsigned char *)imgb->a[i];
+
+    // adresse_base + (ligne * largeur_ligne) + (colonne * taille_pixel)
+
+    GST_DEBUG("Plane %d: imgb->s[i]=%d, imgb->y[i]=%d, imgb->x[i]=%d", i,
+              imgb->s[i], imgb->y[i], imgb->x[i]);
+
+    // Copier ligne par ligne depuis le buffer GStreamer
+    unsigned char *src_line = map_info.data + plane_offset;
+    int src_stride = GST_VIDEO_INFO_PLANE_STRIDE(video_info, i);
+    int copy_width = MIN(plane_width * bd, src_stride);
+
+    for (j = 0; j < plane_height; j++) {
+      // Vérifier que nous ne dépassons pas la fin du buffer
+      if (src_line + copy_width > map_info.data + map_info.size) {
+        GST_ERROR("Would read beyond buffer end at line %d of plane %d", j, i);
+        gst_buffer_unmap(input_buffer, &map_info);
+        return -1;
+      }
+
+      memcpy(p8, src_line, copy_width);
+      src_line +=
+          src_stride;   // Passer à la ligne suivante dans le buffer source
+      p8 += imgb->s[i]; // Passer à la ligne suivante dans l'image XEVE
+    }
+  }
+
+  // Démapper le buffer
+  gst_buffer_unmap(input_buffer, &map_info);
+
+  return 0;
+}
+
+// Version alternative qui utilise gst_video_frame pour une gestion plus simple
+static int imgb_read_from_gstbuffer_frame(GstBuffer *input_buffer,
+                                          GstVideoInfo *video_info,
+                                          XEVE_IMGB *imgb, int chroma) {
+  GstVideoFrame video_frame;
+  unsigned char *p8;
+  int i, j, bd;
+  int bit_depth = XEVE_CS_GET_BIT_DEPTH(chroma);
+
+  // Mapper le buffer comme un frame vidéo
+  if (!gst_video_frame_map(&video_frame, video_info, input_buffer,
+                           GST_MAP_READ)) {
+    GST_ERROR("Failed to map video frame");
+    return -1;
+  }
+
+  // Déterminer la taille des échantillons
+  bd = (bit_depth <= 8) ? 1 : 2;
+
+  // Copier chaque plan
+  for (i = 0; i < imgb->np && i < GST_VIDEO_FRAME_N_PLANES(&video_frame); i++) {
+    int plane_width = GST_VIDEO_FRAME_COMP_WIDTH(&video_frame, i);
+    int plane_height = GST_VIDEO_FRAME_COMP_HEIGHT(&video_frame, i);
+    int src_stride = GST_VIDEO_FRAME_PLANE_STRIDE(&video_frame, i);
+    unsigned char *src_data = GST_VIDEO_FRAME_PLANE_DATA(&video_frame, i);
+
+    // Pointer vers le plan de destination
+    p8 = (unsigned char *)imgb->a[i] + (imgb->s[i] * imgb->y[i]) +
+         (imgb->x[i] * bd);
+
+    GST_DEBUG("Copying plane %d: %dx%d, src_stride=%d, dst_stride=%d", i,
+              plane_width, plane_height, src_stride, imgb->s[i]);
+
+    // Copier ligne par ligne
+    for (j = 0; j < plane_height; j++) {
+      memcpy(p8, src_data + j * src_stride, plane_width * bd);
+      p8 += imgb->s[i];
+    }
+  }
+
+  gst_video_frame_unmap(&video_frame);
+  return 0;
+}
+
 #if 0
 static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
                                                GstVideoCodecFrame *frame) {
@@ -1791,6 +1927,7 @@ static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
   bit_buf.addr = priv->bs_buf;
 
   // Convert GstBuffer to XEVE_IMGB
+#if 1
   if (gstbuffer_to_xeve_imgb_new(self->fp, self->fp_Y, self->fp_U, self->fp_V,
                                  frame->input_buffer, info, self->imgb_rec,
                                  priv->xeve_cdsc->param.cs,
@@ -1798,6 +1935,14 @@ static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
     GST_ERROR_OBJECT(self, "Failed to convert GstBuffer to XEVE_IMGB");
     return GST_FLOW_ERROR;
   }
+#else
+  // GstBuffer *input_buffer, GstVideoInfo *video_info, XEVE_IMGB *imgb, int
+  // chroma
+
+  imgb_read_from_gstbuffer(frame->input_buffer, info, self->imgb_rec,
+                           priv->xeve_cdsc->param.cs);
+
+#endif
 
   // Debug: write frame to file (remove in production)
   imgb_write("outdump.yuv", self->imgb_rec, priv->xeve_cdsc->param.w,
