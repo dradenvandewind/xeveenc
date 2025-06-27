@@ -1594,7 +1594,7 @@ int gstbuffer_to_xeve_imgb(GstBuffer *gst_buffer, GstVideoInfo *video_info, XEVE
     return 0;
 }
 #endif
-
+#if 0
 static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
                                                GstVideoCodecFrame *frame) {
   GstXeveEnc *self = GST_XEVE_ENC(encoder);
@@ -1742,8 +1742,13 @@ static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
 
       frame->pts = GST_BUFFER_PTS(frame->input_buffer);
       frame->duration = GST_BUFFER_DURATION(frame->input_buffer);
+      
+
       ret = gst_video_encoder_finish_frame(encoder, frame);
-      GST_DEBUG_OBJECT(self, "gst_video_encoder_finish_frame (ret=%d)", ret);
+      if (ret != GST_FLOW_OK) {
+    GST_WARNING_OBJECT(encoder, "finish_frame() returned: %s", gst_flow_get_name(ret));
+}
+
       priv->frame_number++;
       GST_DEBUG_OBJECT(self, " frame inc to bitstream %d)", priv->frame_number);
     }
@@ -1767,7 +1772,117 @@ unmap_input:
 done:
   return ret;
 }
+#else
+static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
+                                               GstVideoCodecFrame *frame) {
+  GstXeveEnc *self = GST_XEVE_ENC(encoder);
+  GstXeveEncPrivate *priv = GST_XEVE_ENC_GET_PRIVATE(self);
+  GstVideoInfo *info = &priv->input_state->info;
+  XEVE_IMGB img_buf = {0};
+  XEVE_STAT stat; /* encoding status */
+  XEVE_BITB bit_buf = {0};
+  GstBuffer *out_buf = NULL;
+  GstFlowReturn ret = GST_FLOW_OK;
+  gint encoder_return;
+  int err;
 
+  // Initialize bitstream buffer
+  bit_buf.bsize = priv->xeve_cdsc->max_bs_buf_size;
+  bit_buf.addr = priv->bs_buf;
+
+  // Convert GstBuffer to XEVE_IMGB
+  if (gstbuffer_to_xeve_imgb_new(self->fp, self->fp_Y, self->fp_U, self->fp_V,
+                                 frame->input_buffer, info, self->imgb_rec,
+                                 priv->xeve_cdsc->param.cs,
+                                 self->bit_depth) != 0) {
+    GST_ERROR_OBJECT(self, "Failed to convert GstBuffer to XEVE_IMGB");
+    return GST_FLOW_ERROR;
+  }
+
+  // Debug: write frame to file (remove in production)
+  imgb_write("outdump.yuv", self->imgb_rec, priv->xeve_cdsc->param.w,
+             priv->xeve_cdsc->param.h);
+
+  // Push frame to encoder
+  err = xeve_push(priv->xeve_handle, self->imgb_rec);
+  if (XEVE_FAILED(err)) {
+    GST_ERROR_OBJECT(
+        self, "xeve_push() failed to push frame to encoder (err=%d)", err);
+    return GST_FLOW_ERROR;
+  }
+
+  // Encode the frame
+  encoder_return = xeve_encode(priv->xeve_handle, &bit_buf, &stat);
+  if (XEVE_FAILED(encoder_return)) {
+    GST_ERROR_OBJECT(self, "Failed to encode frame (ret=%d)", encoder_return);
+    return GST_FLOW_ERROR;
+  }
+
+  GST_DEBUG_OBJECT(self, "Bitstream buffer size: %zu, bytes written: %d",
+                   (size_t)bit_buf.bsize, stat.write);
+
+  // Handle encoder return status
+  if (encoder_return == XEVE_OK_OUT_NOT_AVAILABLE) {
+    GST_DEBUG_OBJECT(
+        self, "Encoding successful, but output not available temporarily");
+    // No output available for this frame - this is normal for some frames
+    gst_video_encoder_finish_frame(encoder, frame);
+    return GST_FLOW_OK;
+
+  } else if (encoder_return == XEVE_OK) {
+    GST_DEBUG_OBJECT(self, "Encoding successful, output size: %d bytes",
+                     stat.write);
+
+    if (stat.write > 0 && stat.write < MAX_BITSTREAM_SIZE) {
+      // Create output buffer with exact size needed
+      out_buf = gst_buffer_new_allocate(NULL, stat.write, NULL);
+      if (!out_buf) {
+        GST_ERROR_OBJECT(self, "Failed to allocate output buffer");
+        return GST_FLOW_ERROR;
+      }
+
+      // Copy encoded data to output buffer
+      gst_buffer_fill(out_buf, 0, bit_buf.addr, stat.write);
+
+      // Set timestamps
+      GST_BUFFER_PTS(out_buf) = GST_BUFFER_PTS(frame->input_buffer);
+      GST_BUFFER_DTS(out_buf) = GST_BUFFER_DTS(frame->input_buffer);
+      GST_BUFFER_DURATION(out_buf) = GST_BUFFER_DURATION(frame->input_buffer);
+
+      // Assign output buffer to frame
+      frame->output_buffer = out_buf;
+
+      // Finish frame processing
+      ret = gst_video_encoder_finish_frame(encoder, frame);
+      if (ret != GST_FLOW_OK) {
+        GST_WARNING_OBJECT(encoder, "finish_frame() returned: %s",
+                           gst_flow_get_name(ret));
+        return ret;
+      }
+
+      priv->frame_number++;
+      GST_DEBUG_OBJECT(self, "Frame %d encoded successfully",
+                       priv->frame_number);
+
+    } else {
+      GST_WARNING_OBJECT(self, "Invalid output size: %d", stat.write);
+      gst_video_encoder_finish_frame(encoder, frame);
+    }
+
+  } else if (encoder_return == XEVE_OK_NO_MORE_FRM) {
+    GST_DEBUG_OBJECT(self, "No more frames to encode");
+    gst_video_encoder_finish_frame(encoder, frame);
+
+  } else {
+    GST_ERROR_OBJECT(self, "Unexpected encoder return value: %d",
+                     encoder_return);
+    return GST_FLOW_ERROR;
+  }
+
+  return GST_FLOW_OK;
+}
+
+#endif
 static gboolean plugin_init(GstPlugin *plugin) {
   return gst_element_register(plugin, "xeveenc", GST_RANK_PRIMARY,
                               GST_TYPE_XEVE_ENC);
