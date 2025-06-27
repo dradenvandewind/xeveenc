@@ -146,6 +146,8 @@ typedef struct {
   gboolean encoder_initialized;
   GstVideoCodecState *input_state;
   gint frame_number;
+  unsigned char *bs_buf;
+
 } GstXeveEncPrivate;
 
 #define GST_XEVE_ENC_GET_PRIVATE(obj)                                          \
@@ -258,10 +260,17 @@ static void gst_xeve_enc_init(GstXeveEnc *self) {
   priv->input_state = NULL;
   priv->encoder_initialized = FALSE;
   priv->frame_number = 0;
+  priv->bs_buf = NULL;
 
   // Secure allocation
   priv->xeve_cdsc = g_malloc0(sizeof(XEVE_CDSC));
   priv->xeve_cdsc->max_bs_buf_size = MAX_BITSTREAM_SIZE;
+  priv->bs_buf = g_malloc0(MAX_BITSTREAM_SIZE);
+  if (!priv->bs_buf) {
+    GST_ERROR_OBJECT(self, "Failed to allocate bitstream buffer");
+    return;
+  }
+
 #if 0
   g_print("priv->xeve_cdsc %x \n", priv->xeve_cdsc);
   g_print("priv->xeve_cdsc->max_bs_buf_size %d \n", priv->xeve_cdsc->max_bs_buf_size);
@@ -339,6 +348,13 @@ static void gst_xeve_enc_dispose(GObject *object) {
     imgb_free(self->imgb_rec);
     self->imgb_rec = NULL;
   }
+
+  if (priv->bs_buf) {
+    g_free(priv->bs_buf);
+    priv->bs_buf = NULL;
+  }
+
+  // Close any open files
   if (self->fp) {
     fclose(self->fp);
     self->fp = NULL;
@@ -507,6 +523,9 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
 
 #endif
 #if 1
+  width = (width + 7) & 0xFFF8;
+  height = (height + 7) & 0xFFF8;
+
   self->imgb_rec = imgb_alloc(width, height, priv->xeve_cdsc->param.cs);
   if (!self->imgb_rec) {
     imgb_free(self->imgb_rec);
@@ -1585,11 +1604,16 @@ static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
   XEVE_STAT stat; /* encoding status */
 
   XEVE_BITB bit_buf = {0};
-  GstBuffer *out_buf;
-  GstFlowReturn ret = GST_FLOW_ERROR;
+  GstBuffer *out_buf = NULL;
+  GstFlowReturn ret = GST_FLOW_OK;
+  gint encoder_return;
 
   int err;
   GstMapInfo in_map, out_map;
+
+  bit_buf.bsize = priv->xeve_cdsc->max_bs_buf_size;
+  bit_buf.addr = priv->bs_buf;
+
 #if 0    
     // Convert GstBuffer to XEVE_IMGB using the helper function
     if (gstbuffer_to_xeve_imgb(frame->input_buffer, info, self->imgb_rec, priv->xeve_cdsc->param.cs, self->bit_depth) != 0) {
@@ -1628,11 +1652,13 @@ static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
   }
 
   // Allocate output buffer - use the configured max bitstream size
+  /*
   out_buf = gst_buffer_new_and_alloc(priv->xeve_cdsc->max_bs_buf_size);
   if (!out_buf) {
     GST_ERROR_OBJECT(self, "Failed to allocate output buffer");
     goto unmap_input;
   }
+
 
   // Map output buffer for writing
   if (!gst_buffer_map(out_buf, &out_map, GST_MAP_WRITE)) {
@@ -1640,24 +1666,58 @@ static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
     gst_buffer_unref(out_buf);
     goto unmap_input;
   }
+  */
+
+  GST_ERROR_OBJECT(self, "  bit_buf.bsize %ld out_map.size %ld \n",
+                   bit_buf.bsize, out_map.size);
 
   // Set up bitstream buffer
-  bit_buf.addr = out_map.data;
-  bit_buf.bsize = out_map.size;
+  // bit_buf.addr = out_map.data;
+  // bit_buf.bsize = out_map.size;
 
   // Encode the frame
 
-  ret = xeve_encode(priv->xeve_handle, &bit_buf, &stat);
-
-  // Unmap output buffer immediately after encoding
-  gst_buffer_unmap(out_buf, &out_map);
-
-  if (XEVE_FAILED(ret)) {
-    GST_ERROR_OBJECT(self, "Failed to encode frame (ret=%d)", ret);
+  encoder_return = xeve_encode(priv->xeve_handle, &bit_buf, &stat);
+  if (XEVE_FAILED(encoder_return)) {
+    GST_ERROR_OBJECT(self, "Failed to encode frame (ret=%d)", encoder_return);
     ret = -1;
   }
 
-  if (ret == XEVE_OK_OUT_NOT_AVAILABLE) {
+  GST_ERROR_OBJECT(self, "  bit_buf.bsize %zu stat.write %d \n",
+                   (size_t)bit_buf.bsize, stat.write);
+
+  if (stat.write > 0 && stat.write < MAX_BITSTREAM_SIZE) {
+    g_print("File: %s | Function: %s | Line: %d\n", __FILE__, __func__,
+            __LINE__);
+
+    out_buf = gst_buffer_new_allocate(NULL, stat.write, NULL);
+    g_print("File: %s | Function: %s | Line: %d\n", __FILE__, __func__,
+            __LINE__);
+
+    gst_buffer_fill(out_buf, 0, bit_buf.addr, stat.write);
+    g_print("File: %s | Function: %s | Line: %d\n", __FILE__, __func__,
+            __LINE__);
+
+    frame->output_buffer = out_buf;
+    g_print("File: %s | Function: %s | Line: %d\n", __FILE__, __func__,
+            __LINE__);
+
+    gst_buffer_unref(out_buf);
+    // Unmap output buffer immediately after encoding
+    g_print("File: %s | Function: %s | Line: %d\n", __FILE__, __func__,
+            __LINE__);
+
+    // gst_buffer_unmap(out_buf, &out_map);
+  }
+
+  // Set up bitstream buffer
+  // out_map.data = bit_buf.addr;
+  // out_map.size = bit_buf.bsize;
+
+  // Unmap output buffer immediately after encoding
+  // gst_buffer_unmap(out_buf, &out_map);
+
+  if (encoder_return == XEVE_OK_OUT_NOT_AVAILABLE) {
 
     // GST_INFO_OBJECT(self, "XEVE_OK_OUT_NOT_AVAILABLE (ret=%d)", ret);
     GST_DEBUG_OBJECT(
@@ -1668,17 +1728,17 @@ static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
 
     ret = 0;
     // continue;
-  } else if (ret == XEVE_OK) {
+  } else if (encoder_return == XEVE_OK) {
 
     // GST_INFO_OBJECT(self, "XEVE_OK (ret=%d)", ret);
     GST_INFO_OBJECT(self, "actual encoded size (size=%d)", stat.write);
 
     if (stat.write > 0) {
       // Resize buffer to actual encoded size
-      gst_buffer_resize(out_buf, 0, stat.write);
+      // gst_buffer_resize(out_buf, 0, stat.write);
 
       // Set output buffer and finish frame processing
-      frame->output_buffer = out_buf;
+      // frame->output_buffer = out_buf;
 
       frame->pts = GST_BUFFER_PTS(frame->input_buffer);
       frame->duration = GST_BUFFER_DURATION(frame->input_buffer);
@@ -1688,7 +1748,7 @@ static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
       GST_DEBUG_OBJECT(self, " frame inc to bitstream %d)", priv->frame_number);
     }
 
-  } else if (ret == XEVE_OK_NO_MORE_FRM) {
+  } else if (encoder_return == XEVE_OK_NO_MORE_FRM) {
     // break;
   } else {
     GST_INFO_OBJECT(self, "XEVE_OK (err=%d)", ret);
