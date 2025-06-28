@@ -486,8 +486,9 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
   // Color format configuration
   switch (GST_VIDEO_INFO_FORMAT(info)) {
   case GST_VIDEO_FORMAT_I420:
-    priv->xeve_cdsc->param.cs = XEVE_CS_SET(
-        XEVE_CS_YCBCR420, priv->xeve_cdsc->param.codec_bit_depth, 0);
+    self->bit_depth = 8;
+    priv->xeve_cdsc->param.cs =
+        XEVE_CS_SET(XEVE_CS_YCBCR420, self->bit_depth, 0);
     self->bit_depth = 8;
     break;
   case GST_VIDEO_FORMAT_Y42B:
@@ -523,8 +524,8 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
 
 #endif
 #if 1
-  width = (width + 7) & 0xFFF8;
-  height = (height + 7) & 0xFFF8;
+  // width = (width + 7) & 0xFFF8;
+  // height = (height + 7) & 0xFFF8;
 
   self->imgb_rec = imgb_alloc(width, height, priv->xeve_cdsc->param.cs);
   if (!self->imgb_rec) {
@@ -831,6 +832,51 @@ I420Planes extract_i420_planes(GstBuffer *buffer, GstVideoInfo *info) {
 }
 
 #endif
+
+void display_XEVE_Img(XEVE_IMGB *img) {
+  if (!img) {
+    g_print("XEVE_IMGB is NULL\n");
+    return;
+  }
+
+  g_print("XEVE_IMGB details:\n");
+  g_print("Number of planes: %d\n", img->np);
+  g_print("Color space: %d\n", img->cs);
+  for (int i = 0; i < img->np; i++) {
+    g_print("Plane %d: width=%d, height=%d, stride=%d\n", i, img->w[i],
+            img->h[i], img->s[i]);
+    g_print("Plane %d: x=%d, y=%d, e=%d\n", i, img->x[i], img->y[i], img->e[i]);
+
+    g_print("Plane %d: aw=%d, ah=%d \n", i, img->aw[i], img->aw[i]);
+    g_print("Plane %d: padl=%d, padr=%d padu=%d, padb=%d \n", i, img->padl[i],
+            img->padl[i], img->padu[i], img->padb[i]);
+    g_print("Plane %d:  actual allocated buffer size  bsize=%d\n", i,
+            img->bsize[i]);
+    /* time-stamps */
+    // XEVE_MTIME          ts[XEVE_TS_NUM];
+    /*
+    XEVE_IMGB details:
+  Number of planes: 3
+  Color space: 2571
+  Plane 0: width=352, height=288, stride=352
+  Plane 0: x=0, y=0, e=288
+  Plane 0: aw=352, ah=352
+  Plane 0: padl=0, padr=0 padu=0, padb=0
+  Plane 0:  actual allocated buffer size  bsize=202752
+  Plane 1: width=176, height=144, stride=176
+  Plane 1: x=0, y=0, e=144
+  Plane 1: aw=176, ah=176
+  Plane 1: padl=0, padr=0 padu=0, padb=0
+  Plane 1:  actual allocated buffer size  bsize=50688
+  Plane 2: width=176, height=144, stride=176
+  Plane 2: x=0, y=0, e=144
+  Plane 2: aw=176, ah=176
+  Plane 2: padl=0, padr=0 padu=0, padb=0
+  Plane 2:  actual allocated buffer size  bsize=50688
+
+    */
+  }
+}
 
 #if 1
 // Fixed gstbuffer_to_xeve_imgb function
@@ -1935,6 +1981,8 @@ static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
     GST_ERROR_OBJECT(self, "Failed to convert GstBuffer to XEVE_IMGB");
     return GST_FLOW_ERROR;
   }
+  display_XEVE_Img(self->imgb_rec);
+
 #else
   // GstBuffer *input_buffer, GstVideoInfo *video_info, XEVE_IMGB *imgb, int
   // chroma
