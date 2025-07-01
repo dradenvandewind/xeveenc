@@ -2055,6 +2055,8 @@ static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
   int err;
   XEVE_CLK clk_beg, clk_end, clk_tot;
   clk_tot = 0;
+  GstMapInfo map;
+  char *type_I_P_B = NULL;
 
   // Initialize bitstream buffer
   // bit_buf.bsize = priv->xeve_cdsc->max_bs_buf_size;
@@ -2132,20 +2134,26 @@ static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
   } else if (encoder_return == XEVE_OK) {
     GST_DEBUG_OBJECT(self, "Encoding successful, output size: %d bytes",
                      stat.write);
+    priv->frame_number++;
     switch (stat.stype) {
     case XEVE_ST_I:
-      GST_DEBUG_OBJECT(self, "Frame type: I");
+      type_I_P_B = "I";
       break;
     case XEVE_ST_P:
-      GST_DEBUG_OBJECT(self, "Frame type: P");
+      type_I_P_B = "P";
       break;
     case XEVE_ST_B:
-      GST_DEBUG_OBJECT(self, "Frame type: B");
+      type_I_P_B = "B";
       break;
     default:
       GST_DEBUG_OBJECT(self, "Frame type: Unknown");
+      type_I_P_B = "Unknown";
       break;
     }
+
+    GST_DEBUG_OBJECT(self,
+                     "Frame type: %s / Frame number %d encoded successfully",
+                     type_I_P_B, priv->frame_number);
 
     if (stat.write > 0 && stat.write < MAX_BITSTREAM_SIZE) {
       // Create output buffer with exact size needed
@@ -2161,7 +2169,7 @@ static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
       // gst_buffer_fill(out_buf, 0, priv->bitb.addr, stat.write);
       // memcpy(out_buf, priv->bitb.addr, stat.write);
       //  Map the buffer for writing
-      GstMapInfo map;
+
       if (gst_buffer_map(out_buf, &map, GST_MAP_WRITE)) {
         // Copy encoded data to output buffer
         memcpy(map.data, priv->bitb.addr, stat.write);
@@ -2187,10 +2195,6 @@ static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
                            gst_flow_get_name(ret));
         return ret;
       }
-
-      priv->frame_number++;
-      GST_DEBUG_OBJECT(self, "Frame %d encoded successfully",
-                       priv->frame_number);
 
     } else {
       GST_WARNING_OBJECT(self, "Invalid output size: %d", stat.write);
