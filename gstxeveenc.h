@@ -11,6 +11,7 @@
 
 #define DEBUG TRUE
 #define MAX_BITSTREAM_SIZE (10 * 1000 * 1000)
+#define MAX_BS_BUF (16 * 1024 * 1024)
 
 G_BEGIN_DECLS
 
@@ -36,7 +37,7 @@ struct _GstXeveEnc {
   gint keyint_max;
   gboolean annexb;
   XEVE_IMGB *imgb_rec;
-  FILE *fp, *fp_Y, *fp_U, *fp_V;
+  FILE *fp, *fp_Y, *fp_U, *fp_V, *fp_bitstream;
 
   /*< private >*/
   gpointer priv;
