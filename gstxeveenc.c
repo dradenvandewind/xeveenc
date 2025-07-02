@@ -139,6 +139,10 @@ void print_xeve_param(const XEVE_PARAM *param) {
 
 GST_DEBUG_CATEGORY_STATIC(gst_xeve_enc_debug);
 #define GST_CAT_DEFAULT gst_xeve_enc_debug
+typedef enum State {
+  STATE_ENCODING,
+  STATE_BUMPING,
+} State;
 
 typedef struct {
   XEVE xeve_handle;
@@ -148,6 +152,7 @@ typedef struct {
   gint frame_number;
   unsigned char *bs_buf;
   XEVE_BITB bitb;
+  State state; // Current state of the encoder
 
 } GstXeveEncPrivate;
 
@@ -526,10 +531,10 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
   priv->xeve_cdsc->param.h = height;
   priv->xeve_cdsc->param.fps.num = fps_n;
   priv->xeve_cdsc->param.fps.den = fps_d;
-  priv->xeve_cdsc->param.keyint = 1; // 0: only one I-frame at the first time;
-                                     // 1: every frame is coded in I-frame
-  priv->xeve_cdsc->param.bframes =
-      0; // No B-frames for now to investigate todo conf from input plugin
+  priv->xeve_cdsc->param.keyint = 5;  // 0: only one I-frame at the first time;
+                                      // 1: every frame is coded in I-frame
+  priv->xeve_cdsc->param.bframes = 0; // Number of B-frames between I-frames
+  // 0; // No B-frames for now to investigate todo conf from input plugin
 
   priv->xeve_cdsc->param.rc_type = XEVE_RC_CQP;
   priv->xeve_cdsc->param.bitrate = 5; // in kbps
@@ -694,8 +699,8 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
     // goto ERR;
   }
 
-  priv->xeve_cdsc->param.rc_type = XEVE_RC_CQP;
-  // XEVE_RC_ABR;
+  // priv->xeve_cdsc->param.rc_type = XEVE_RC_CQP;
+  //  XEVE_RC_ABR;
 
   g_print("File: %s | Function: %s | Line: %d\n", __FILE__, __func__, __LINE__);
 
@@ -723,14 +728,6 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
   if (!priv->xeve_handle) {
     GST_ERROR_OBJECT(self, "cannot create XEVE encoder: %d", err);
   }
-#ifdef false
-  /* create encoder */
-  // id = xeve_create(priv->xeve_cdsc, NULL);
-  if (id == NULL) {
-    g_print("cannot create XEVE encoder\n");
-    // ret = -1; goto ERR;
-  }
-#endif
 
   if (!priv->xeve_handle || err != XEVE_OK) {
     GST_ERROR_OBJECT(self, "Failed to initialize XEVE encoder (err=%d)", err);
@@ -1006,6 +1003,11 @@ int gstbuffer_to_xeve_imgb_new(FILE *file, FILE *fileY, FILE *fileU,
 
   GstBuffer *tmp_gst_buffer;
 
+  int shift_h = 1;
+  int shift_v = 1;
+  int width_chroma = 0;
+  int height_chroma = 0;
+
   tmp_gst_buffer = gst_buffer_copy_region(gst_buffer, GST_BUFFER_COPY_ALL,
                                           0, // offset
                                           gst_buffer_get_size(gst_buffer));
@@ -1075,13 +1077,15 @@ int gstbuffer_to_xeve_imgb_new(FILE *file, FILE *fileY, FILE *fileU,
   y_stride = GST_VIDEO_INFO_PLANE_STRIDE(video_info, 0);
   y_offset = GST_VIDEO_INFO_PLANE_OFFSET(video_info, 0);
 
+  width_chroma = CEIL_RSHIFT(width, shift_h);
+  height_chroma = CEIL_RSHIFT(height, shift_v);
+
   // Configure imgb based on format
   switch (GST_VIDEO_INFO_FORMAT(video_info)) {
   case GST_VIDEO_FORMAT_I420:
-  case GST_VIDEO_FORMAT_YV12:
-    imgb->np = 3;
+    imgb->np = 3; /* only for yuv420p, yuv420ple */
     imgb->cs = in_chroma_format;
-
+#if 0
     // Y plane
     imgb->w[0] = width;
     imgb->h[0] = height;
@@ -1091,29 +1095,31 @@ int gstbuffer_to_xeve_imgb_new(FILE *file, FILE *fileY, FILE *fileU,
     imgb->w[1] = imgb->w[2] = width / 2;
     imgb->h[1] = imgb->h[2] = height / 2;
     imgb->s[1] = imgb->s[2] = ALIGN_VAL((width / 2), 16);
+#else
+    for (int i = 0; i < imgb->np; i++)
+      imgb->x[i] = imgb->y[i] = 0;
+    // Chroma subsampling
+    //
+    // YUV format explanation
+    // shift_h == 1 && shift_v == 1 : YUV420
+    // shift_h == 1 && shift_v == 0 : YUV422
+    // shift_h == 0 && shift_v == 0 : YUV444
 
+    imgb->w[0] = imgb->aw[0] = width; // width luma
+    imgb->w[1] = imgb->w[2] = imgb->aw[1] = imgb->aw[2] =
+        width_chroma;                  // width / 2; // width chroma
+    imgb->h[0] = imgb->ah[0] = height; // height luma
+    imgb->h[1] = imgb->h[2] = imgb->ah[1] = imgb->ah[2] =
+        height_chroma; // height / 2; // height chroma
+    //
+    imgb->s[0] = ALIGN_VAL(width, 16);
+    imgb->s[1] = imgb->s[2] = ALIGN_VAL((width_chroma), 16);
+
+#endif
     u_stride = GST_VIDEO_INFO_PLANE_STRIDE(video_info, 1);
     v_stride = GST_VIDEO_INFO_PLANE_STRIDE(video_info, 2);
     u_offset = GST_VIDEO_INFO_PLANE_OFFSET(video_info, 1);
     v_offset = GST_VIDEO_INFO_PLANE_OFFSET(video_info, 2);
-    break;
-
-  case GST_VIDEO_FORMAT_NV12:
-    imgb->np = 2;
-    imgb->cs = in_chroma_format;
-
-    // Y plane
-    imgb->w[0] = width;
-    imgb->h[0] = height;
-    imgb->s[0] = ALIGN_VAL(width, 16);
-
-    // UV plane
-    imgb->w[1] = width;
-    imgb->h[1] = height / 2;
-    imgb->s[1] = ALIGN_VAL(width, 16);
-
-    u_stride = GST_VIDEO_INFO_PLANE_STRIDE(video_info, 1);
-    u_offset = GST_VIDEO_INFO_PLANE_OFFSET(video_info, 1);
     break;
 
   default:
@@ -1133,11 +1139,13 @@ int gstbuffer_to_xeve_imgb_new(FILE *file, FILE *fileY, FILE *fileU,
 
   // Set timestamps
   if (GST_BUFFER_PTS_IS_VALID(gst_buffer)) {
-    imgb->ts[0] = GST_BUFFER_PTS(gst_buffer);
+    imgb->ts[XEVE_TS_PTS] = GST_BUFFER_PTS(gst_buffer);
   }
+  /*
   if (GST_BUFFER_DTS_IS_VALID(gst_buffer)) {
     imgb->ts[1] = GST_BUFFER_DTS(gst_buffer);
   }
+    */
 
   imgb->refcnt = 1;
 

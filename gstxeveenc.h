@@ -9,6 +9,7 @@
 #include <xeve_app_util.h>
 
 #define ALIGN_VAL(val, align) ((((val) + (align) - 1) / (align)) * (align))
+#define CEIL_RSHIFT(a, b) (((a) + (1 << (b)) - 1) >> (b))
 
 #define DEBUG TRUE
 #define MAX_BITSTREAM_SIZE (10 * 1000 * 1000)
