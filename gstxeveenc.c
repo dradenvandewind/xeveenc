@@ -264,9 +264,21 @@ static void gst_xeve_enc_init(GstXeveEnc *self) {
   priv->bs_buf = NULL;
 
   // Secure allocation
-  priv->xeve_cdsc = g_malloc0(sizeof(XEVE_CDSC));
-  priv->xeve_cdsc->max_bs_buf_size = MAX_BS_BUF; // MAX_BITSTREAM_SIZE;
-  // priv->bs_buf = g_malloc0(MAX_BITSTREAM_SIZE);
+  // priv->xeve_cdsc = g_malloc0(sizeof(XEVE_CDSC));
+  // memset(priv->xeve_cdsc, 0, sizeof(XEVE_CDSC));
+  priv->xeve_cdsc = g_malloc(sizeof(XEVE_CDSC)); // Allocate but don't zero
+  memset(priv->xeve_cdsc, 0, sizeof(XEVE_CDSC)); // Now safe to memset
+
+  if (priv->xeve_cdsc == NULL) {
+    GST_ERROR_OBJECT(self,
+                     "Failed to allocate XEVE_CDSC structure, Pointer is NULL");
+    return;
+  } else {
+    priv->xeve_cdsc->max_bs_buf_size = MAX_BS_BUF;
+  }
+
+  // priv->xeve_cdsc->max_bs_buf_size = MAX_BS_BUF; // MAX_BITSTREAM_SIZE;
+  //  priv->bs_buf = g_malloc0(MAX_BITSTREAM_SIZE);
   priv->bs_buf = (unsigned char *)malloc(MAX_BS_BUF);
 
   if (!priv->bs_buf) {
@@ -274,8 +286,9 @@ static void gst_xeve_enc_init(GstXeveEnc *self) {
     return;
   }
   // Initialize bitstream buffer
-  if (priv->xeve_cdsc->max_bs_buf_size) {
-    priv->bitb.bsize = priv->xeve_cdsc->max_bs_buf_size;
+  if (priv->bs_buf) {
+    priv->bitb.bsize = MAX_BS_BUF;
+    // priv->xeve_cdsc->max_bs_buf_size;
     priv->bitb.addr = priv->bs_buf;
   }
 
@@ -288,13 +301,7 @@ static void gst_xeve_enc_init(GstXeveEnc *self) {
     /* get default parameters */
     xeve_param_default(&priv->xeve_cdsc->param);
   }
-#if 0
-  // Set default parameters according to xeve_app 
-  priv->xeve_cdsc->param.rdo_dbk_switch = 0;
-  priv->xeve_cdsc->param.me_range = 64;
-  priv->xeve_cdsc->param.me_sub = 2;
-  priv->xeve_cdsc->param.me_sub_range = 1;
-#endif
+
   GST_DEBUG_OBJECT(self, "init completed");
 }
 
@@ -519,6 +526,46 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
   priv->xeve_cdsc->param.h = height;
   priv->xeve_cdsc->param.fps.num = fps_n;
   priv->xeve_cdsc->param.fps.den = fps_d;
+  priv->xeve_cdsc->param.keyint = 1; // 0: only one I-frame at the first time;
+                                     // 1: every frame is coded in I-frame
+  priv->xeve_cdsc->param.bframes =
+      0; // No B-frames for now to investigate todo conf from input plugin
+
+  priv->xeve_cdsc->param.rc_type = XEVE_RC_CQP;
+  priv->xeve_cdsc->param.bitrate = 5; // in kbps
+
+  // Only proceed if xeve_cdsc and its params are valid
+  if (priv->xeve_cdsc && priv->xeve_cdsc->param.fps.num != 0) {
+    if (priv->xeve_cdsc->param.rc_type == XEVE_RC_ABR ||
+        priv->xeve_cdsc->param.rc_type == XEVE_RC_CRF) {
+      // ABR/CRF: VBV = (bitrate / fps) × buffer_duration (floating-point math)
+      float buffer_duration_in_seconds =
+          2.0f; // Adjust as needed (1-4 sec typical)
+      priv->xeve_cdsc->param.vbv_bufsize =
+          (int)(buffer_duration_in_seconds *
+                (priv->xeve_cdsc->param.bitrate /
+                 (float)priv->xeve_cdsc->param.fps.num));
+    } else if (priv->xeve_cdsc->param.rc_type == XEVE_RC_CQP) {
+      // CQP: Fixed bitrate (5kbps example) and 2x buffer
+      priv->xeve_cdsc->param.bitrate =
+          5; // Default bitrate for CQP (adjust if needed)
+      priv->xeve_cdsc->param.vbv_bufsize = priv->xeve_cdsc->param.bitrate * 2;
+    }
+  } else {
+    // Fallback: Handle invalid config (log error + safe defaults)
+    fprintf(stderr, "ERROR: Invalid xeve_cdsc or zero fps.num!\n");
+    GST_ERROR_OBJECT(self, "ERROR: Invalid xeve_cdsc or zero fps.num");
+
+    if (priv->xeve_cdsc) {
+      priv->xeve_cdsc->param.vbv_bufsize = priv->xeve_cdsc->param.bitrate * 2;
+    }
+  }
+
+  priv->xeve_cdsc->param.bitrate = 5; // in kbps
+
+  priv->xeve_cdsc->param.vbv_bufsize =
+      2 * priv->xeve_cdsc->param.bitrate; // 12 kbits
+                                          //
 
 #if 0
   // Color format configuration
@@ -654,7 +701,7 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
     priv->xeve_cdsc->param.keyint = self->keyint_max;
     priv->xeve_cdsc->param.use_annexb = self->annexb;
   */
-  priv->xeve_cdsc->param.threads = 8;
+  priv->xeve_cdsc->param.threads = (int)sysconf(_SC_NPROCESSORS_ONLN); // 8;
 
   // Apply presets
 
@@ -2162,13 +2209,6 @@ static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
         GST_ERROR_OBJECT(self, "Failed to allocate output buffer");
         return GST_FLOW_ERROR;
       }
-
-      // Copy encoded data to output buffer
-      // gst_buffer_fill(out_buf, 0, bit_buf.addr, stat.write);
-
-      // gst_buffer_fill(out_buf, 0, priv->bitb.addr, stat.write);
-      // memcpy(out_buf, priv->bitb.addr, stat.write);
-      //  Map the buffer for writing
 
       if (gst_buffer_map(out_buf, &map, GST_MAP_WRITE)) {
         // Copy encoded data to output buffer

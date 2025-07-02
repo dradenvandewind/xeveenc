@@ -4,6 +4,7 @@
 #include <gst/gst.h>
 #include <gst/video/gstvideoencoder.h>
 #include <gst/video/video.h>
+#include <unistd.h> // for sysconf
 #include <xeve.h>
 #include <xeve_app_util.h>
 
