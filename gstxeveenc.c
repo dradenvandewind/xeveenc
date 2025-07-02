@@ -561,12 +561,6 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
     }
   }
 
-  priv->xeve_cdsc->param.bitrate = 5; // in kbps
-
-  priv->xeve_cdsc->param.vbv_bufsize =
-      2 * priv->xeve_cdsc->param.bitrate; // 12 kbits
-                                          //
-
 #if 0
   // Color format configuration
   switch (GST_VIDEO_INFO_FORMAT(info)) {
@@ -592,35 +586,20 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
         XEVE_CS_YCBCR420; /// test
                           // XEVE_CS_SET(XEVE_CF_YCBCR420,
                           // priv->xeve_cdsc->param.codec_bit_depth, 0);
-    priv->xeve_cdsc->param.cs =
-        XEVE_CS_SET(XEVE_CF_YCBCR420, self->bit_depth, 0);
-    ;
+
+    // priv->xeve_cdsc->param.cs = XEVE_CS_SET(XEVE_CF_YCBCR420,
+    // self->bit_depth, 0);
 
     self->bit_depth = 8;
     break;
-  case GST_VIDEO_FORMAT_Y42B:
-    priv->xeve_cdsc->param.cs = XEVE_CS_SET(
-        XEVE_CF_YCBCR422, priv->xeve_cdsc->param.codec_bit_depth, 0);
-    self->bit_depth = 8;
-    break;
-  case GST_VIDEO_FORMAT_Y444:
-    priv->xeve_cdsc->param.cs = XEVE_CS_SET(
-        XEVE_CF_YCBCR444, priv->xeve_cdsc->param.codec_bit_depth, 0);
-    self->bit_depth = 8;
-    break;
   case GST_VIDEO_FORMAT_I420_10LE:
-    priv->xeve_cdsc->param.cs = XEVE_CS_SET(
-        XEVE_CF_YCBCR420, priv->xeve_cdsc->param.codec_bit_depth, 0);
+    priv->xeve_cdsc->param.cs = XEVE_CS_YCBCR420_10LE;
+    // XEVE_CS_SET(XEVE_CF_YCBCR420, priv->xeve_cdsc->param.codec_bit_depth, 0);
     self->bit_depth = 10;
     break;
-  case GST_VIDEO_FORMAT_I422_10LE:
+  case GST_VIDEO_FORMAT_I420_10BE:
     priv->xeve_cdsc->param.cs = XEVE_CS_SET(
-        XEVE_CF_YCBCR422, priv->xeve_cdsc->param.codec_bit_depth, 0);
-    self->bit_depth = 10;
-    break;
-  case GST_VIDEO_FORMAT_Y444_10LE:
-    priv->xeve_cdsc->param.cs = XEVE_CS_SET(
-        XEVE_CF_YCBCR444, priv->xeve_cdsc->param.codec_bit_depth, 0);
+        XEVE_CF_YCBCR420, priv->xeve_cdsc->param.codec_bit_depth, 1);
     self->bit_depth = 10;
     break;
   default:
