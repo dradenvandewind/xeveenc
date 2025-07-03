@@ -11,6 +11,39 @@
 #define ALIGN_VAL(val, align) ((((val) + (align) - 1) / (align)) * (align))
 #define CEIL_RSHIFT(a, b) (((a) + (1 << (b)) - 1) >> (b))
 
+static const char *const xeve_sar_names[] = {
+    "unknown", "1:1",    "12:11", "10:11", "16:11", "40:33",
+    "24:11",   "20:11",  "32:11", "80:33", "18:11", "15:11",
+    "64:33",   "160:99", "4:3",   "3:2",   "2:1",   0};
+static const char *const xeve_video_format_names[] = {
+    "component", "pal", "ntsc", "secam", "mac", "unknown", 0};
+static const char *const xeve_fullrange_names[] = {"limited", "full", 0};
+static const char *const xeve_colorprim_names[] = {
+    "reserved", "bt709",     "unknown",   "reserved", "bt470m",
+    "bt470bg",  "smpte170m", "smpte240m", "film",     "bt2020",
+    "smpte428", "smpte431",  "smpte432",  0};
+static const char *const xeve_transfer_names[] = {
+    "reserved",  "bt709",        "unknown",   "reserved",     "bt470m",
+    "bt470bg",   "smpte170m",    "smpte240m", "linear",       "log100",
+    "log316",    "iec61966-2-4", "bt1361e",   "iec61966-2-1", "bt2020-10",
+    "bt2020-12", "smpte2084",    "smpte428",  "arib-std-b67", 0};
+static const char *const xeve_colmatrix_names[] = {"gbr",
+                                                   "bt709",
+                                                   "unknown",
+                                                   "",
+                                                   "fcc",
+                                                   "bt470bg",
+                                                   "smpte170m",
+                                                   "smpte240m",
+                                                   "ycgco",
+                                                   "bt2020nc",
+                                                   "bt2020c",
+                                                   "smpte2085",
+                                                   "chroma-derived-nc",
+                                                   "chroma-derived-c",
+                                                   "ictcp",
+                                                   0};
+
 #define DEBUG TRUE
 #define MAX_BITSTREAM_SIZE (10 * 1000 * 1000)
 #define MAX_BS_BUF (16 * 1024 * 1024)

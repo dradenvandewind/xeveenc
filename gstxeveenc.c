@@ -585,12 +585,12 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
   switch (GST_VIDEO_INFO_FORMAT(info)) {
   case GST_VIDEO_FORMAT_I420:
     self->bit_depth = 8;
-    // priv->xeve_cdsc->param.cs =
-    //     XEVE_CS_SET(XEVE_CF_YCBCR420, self->bit_depth, 0);
     priv->xeve_cdsc->param.cs =
-        XEVE_CS_YCBCR420; /// test
-                          // XEVE_CS_SET(XEVE_CF_YCBCR420,
-                          // priv->xeve_cdsc->param.codec_bit_depth, 0);
+        XEVE_CS_SET(XEVE_CF_YCBCR420, self->bit_depth, 0);
+    // identique
+    // priv->xeve_cdsc->param.cs = XEVE_CS_YCBCR420; /// test
+    //  XEVE_CS_SET(XEVE_CF_YCBCR420,
+    //  priv->xeve_cdsc->param.codec_bit_depth, 0);
 
     // priv->xeve_cdsc->param.cs = XEVE_CS_SET(XEVE_CF_YCBCR420,
     // self->bit_depth, 0);
@@ -626,7 +626,11 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
   // width = (width + 7) & 0xFFF8;
   // height = (height + 7) & 0xFFF8;
 
+  // commented to test
   self->imgb_rec = imgb_alloc(width, height, priv->xeve_cdsc->param.cs);
+  // self->imgb_rec = imgb_alloc(width, height, XEVE_CS_SET(XEVE_CS_YCBCR420,
+  // priv->xeve_cdsc->param.codec_bit_depth, 0));
+
   // self->imgb_rec = imgb_alloc(width, height, 2059);
 
   if (!self->imgb_rec) {
@@ -715,13 +719,6 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
 
 #endif
 
-  if (ret = xeve_param_check(&priv->xeve_cdsc->param)) {
-
-    GST_ERROR_OBJECT(self, "invalid configuration: %d", ret);
-    ret = -1;
-    // goto ERR;
-  }
-
   // XEVE               id = NULL;
 
   priv->xeve_handle = xeve_create(priv->xeve_cdsc, &err);
@@ -737,6 +734,13 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
   if (ret) {
     GST_ERROR_OBJECT(self, "cannot set extra configurations (ret=%d)", ret);
     // ret = -1; goto ERR;
+  }
+
+  if (ret = xeve_param_check(&priv->xeve_cdsc->param)) {
+
+    GST_ERROR_OBJECT(self, "invalid configuration: %d", ret);
+    ret = -1;
+    // goto ERR;
   }
 
   priv->encoder_initialized = TRUE;
@@ -2208,9 +2212,12 @@ static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
       }
 
       // Set timestamps
-      GST_BUFFER_PTS(out_buf) = GST_BUFFER_PTS(frame->input_buffer);
-      GST_BUFFER_DTS(out_buf) = GST_BUFFER_DTS(frame->input_buffer);
-      GST_BUFFER_DURATION(out_buf) = GST_BUFFER_DURATION(frame->input_buffer);
+      GST_BUFFER_PTS(out_buf) = priv->bitb.ts[XEVE_TS_PTS];
+      // GST_BUFFER_PTS(frame->input_buffer);
+      GST_BUFFER_DTS(out_buf) = priv->bitb.ts[XEVE_TS_DTS];
+      // GST_BUFFER_DTS(frame->input_buffer);
+      // GST_BUFFER_DURATION(out_buf) =
+      // GST_BUFFER_DURATION(frame->input_buffer);
 
       // Assign output buffer to frame
       frame->output_buffer = out_buf;
