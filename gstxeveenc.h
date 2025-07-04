@@ -8,6 +8,11 @@
 #include <xeve.h>
 #include <xeve_app_util.h>
 
+#define DEBUG TRUE
+#define DUMP_YUV_INPUT_BUFFER FALSE
+#define MAX_BITSTREAM_SIZE (10 * 1000 * 1000)
+#define MAX_BS_BUF (16 * 1024 * 1024)
+
 #define ALIGN_VAL(val, align) ((((val) + (align) - 1) / (align)) * (align))
 #define CEIL_RSHIFT(a, b) (((a) + (1 << (b)) - 1) >> (b))
 
@@ -43,10 +48,6 @@ static const char *const xeve_colmatrix_names[] = {"gbr",
                                                    "chroma-derived-c",
                                                    "ictcp",
                                                    0};
-
-#define DEBUG TRUE
-#define MAX_BITSTREAM_SIZE (10 * 1000 * 1000)
-#define MAX_BS_BUF (16 * 1024 * 1024)
 
 G_BEGIN_DECLS
 

@@ -226,6 +226,24 @@ static void gst_xeve_enc_class_init(GstXeveEncClass *klass) {
 
   // Add other properties similarly...
 
+  // Define sink pad template with static caps
+  static GstStaticPadTemplate sink_template = GST_STATIC_PAD_TEMPLATE(
+      "sink", GST_PAD_SINK, GST_PAD_ALWAYS,
+      GST_STATIC_CAPS("video/x-raw, "
+                      "format = (string) { I420, I420_10LE }, "
+                      "width = (int) [ 1, MAX ], "
+                      "height = (int) [ 1, MAX ], "
+                      "framerate = (fraction) [ 0, MAX ]"));
+  // define sink caps
+  static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE(
+      "src", GST_PAD_SRC, GST_PAD_ALWAYS,
+      GST_STATIC_CAPS("video/x-xeve, "
+                      "width = (int) [ 1, MAX ], "
+                      "height = (int) [ 1, MAX ], "
+                      "framerate = (fraction) [ 0, MAX ], "
+                      "stream-format = (string) byte-stream, "
+                      "alignment = (string) au"));
+
   gst_element_class_add_static_pad_template(element_class, &sink_template);
   gst_element_class_add_static_pad_template(element_class, &src_template);
 
@@ -374,6 +392,7 @@ static void gst_xeve_enc_dispose(GObject *object) {
     fclose(self->fp);
     self->fp = NULL;
   }
+#if DUMP_YUV_INPUT_BUFFER
   if (self->fp_Y) {
     fclose(self->fp_Y);
     self->fp_Y = NULL;
@@ -386,6 +405,7 @@ static void gst_xeve_enc_dispose(GObject *object) {
     fclose(self->fp_V);
     self->fp_V = NULL;
   }
+#endif
 
   if (self->fp_bitstream) {
     fclose(self->fp_bitstream);
@@ -590,6 +610,7 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
   } else {
     GST_INFO_OBJECT(self, "Dump file opened successfully");
   }
+#if DUMP_YUV_INPUT_BUFFER
   self->fp_Y = fopen("dumpbuf_Y.yuv", "ab");
   if (self->fp_Y == NULL) {
     GST_ERROR_OBJECT(self, "Failed to open Y dump file");
@@ -611,7 +632,7 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
   } else {
     GST_INFO_OBJECT(self, "V dump file opened successfully");
   }
-
+#endif
   self->fp_bitstream = fopen("fp_bitstream.evc", "ab");
   if (self->fp_bitstream == NULL) {
     GST_ERROR_OBJECT(self, "Failed to open bitstream dump file");
@@ -672,18 +693,20 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
   GST_INFO_OBJECT(self, "XEVE encoder initialized successfully: %dx%d", width,
                   height);
 
-  // Set the output caps
+#if 1
+  // Set the src caps
   GstVideoCodecState *output_state;
-  GstCaps *output_caps;
+  GstCaps *src_caps;
 
-  output_caps = gst_caps_new_simple(
+  src_caps = gst_caps_new_simple(
       "video/x-xeve", "width", G_TYPE_INT, width, "height", G_TYPE_INT, height,
       "framerate", GST_TYPE_FRACTION, fps_n, fps_d, "stream-format",
       G_TYPE_STRING, "byte-stream", "alignment", G_TYPE_STRING, "au", NULL);
 
-  output_state =
-      gst_video_encoder_set_output_state(encoder, output_caps, state);
+  output_state = gst_video_encoder_set_output_state(encoder, src_caps, state);
+
   gst_video_codec_state_unref(output_state);
+#endif
 
   return TRUE;
 }
@@ -879,18 +902,19 @@ int gstbuffer_to_xeve_imgb_new(FILE *file, FILE *fileY, FILE *fileU,
       GST_ERROR("Failed to map input buffer");
       return -1;
     }
-
-    if (file) {
+#ifdef DUMP_YUV_INPUT_BUFFER
+    if (fileY) {
       fwrite(map_Y.data, map_Y.size, 1, fileY);
     }
 
-    if (file) {
+    if (fileU) {
       fwrite(map_U.data, map_U.size, 1, fileU);
     }
 
-    if (file) {
+    if (fileV) {
       fwrite(map_V.data, map_V.size, 1, fileV);
     }
+#endif
 
     // Remember to unref when done
     gst_buffer_unref(planes.y_buffer);
@@ -901,10 +925,11 @@ int gstbuffer_to_xeve_imgb_new(FILE *file, FILE *fileY, FILE *fileU,
   width = GST_VIDEO_INFO_WIDTH(video_info);
   height = GST_VIDEO_INFO_HEIGHT(video_info);
   src_data = map.data;
-
+#ifdef DUMP_YUV_INPUT_BUFFER
   if (file) {
     fwrite(map.data, map.size, 1, file);
   }
+#endif
 
   bytes_per_pixel = 1;
 
@@ -1359,10 +1384,10 @@ static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
       return GST_FLOW_ERROR;
     }
   }
-
+#if DEBUG
   GST_DEBUG_OBJECT(self, "Bitstream buffer size: %zu, bytes written: %d",
                    (size_t)priv->bitb.bsize, stat.write);
-
+#endif
   // Handle encoder return status
   if (encoder_return == XEVE_OK_OUT_NOT_AVAILABLE) {
     GST_DEBUG_OBJECT(
@@ -1372,8 +1397,6 @@ static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
     return GST_FLOW_OK;
 
   } else if (encoder_return == XEVE_OK) {
-    GST_DEBUG_OBJECT(self, "Encoding successful, output size: %d bytes",
-                     stat.write);
     priv->frame_number++;
     switch (stat.stype) {
     case XEVE_ST_I:
@@ -1392,8 +1415,9 @@ static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
     }
 
     GST_DEBUG_OBJECT(self,
-                     "Frame type: %s / Frame number %d encoded successfully",
-                     type_I_P_B, priv->frame_number);
+                     "Frame type: %s / Frame number %d encoded successfully, "
+                     "output size: %d bytes",
+                     type_I_P_B, priv->frame_number, stat.write);
 
     if (stat.write > 0 && stat.write < MAX_BITSTREAM_SIZE) {
       // Create output buffer with exact size needed
