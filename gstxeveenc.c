@@ -10,6 +10,28 @@
 #include "gstxeveenc.h"
 #include <string.h>
 
+// In your header file or near the top of gstxeveenc.c:
+
+// Use the existing XEVE macros instead of defining new ones
+#define GST_TYPE_XEVE_RC_MODE (gst_xeve_rc_mode_get_type())
+static GType gst_xeve_rc_mode_get_type(void);
+
+static GType gst_xeve_rc_mode_get_type(void) {
+  static GType rc_mode_type = 0;
+
+  if (!rc_mode_type) {
+    static const GEnumValue rc_modes[] = {
+        {XEVE_RC_CQP, "Constant QP", "cqp"}, // Use XEVE's macros directly
+        {XEVE_RC_ABR, "Average Bitrate", "abr"},
+        {XEVE_RC_CRF, "Constant Rate Factor", "crf"},
+        {0, NULL, NULL}};
+
+    rc_mode_type = g_enum_register_static("GstXeveEncRCMode", rc_modes);
+  }
+
+  return rc_mode_type;
+}
+
 #include <stdio.h>
 #ifdef DEBUG
 
@@ -251,8 +273,10 @@ static void gst_xeve_enc_class_init(GstXeveEncClass *klass) {
       gobject_class, PROP_RC_MODE,
       g_param_spec_enum("rc-mode", "Rate Control Mode",
                         "Rate Control Mode (0 = CQP, 1 = ABR, 2 = CRF)",
-                        GST_TYPE_SEARCH_MODE, XEVE_RC_ABR,
+                        GST_TYPE_XEVE_RC_MODE,
+                        XEVE_RC_ABR, // Use XEVE's macro directly
                         G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
   g_object_class_install_property(
       gobject_class, PROP_KEYINT_MAX,
       g_param_spec_int("keyint-max", "Keyint Max",
