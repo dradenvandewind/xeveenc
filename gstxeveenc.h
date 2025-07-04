@@ -67,9 +67,15 @@ struct _GstXeveEnc {
   gint bitrate;
   gint qp;
   gint hash;
+  gint info_sei;
+  gint rc_mode; // Rate Control Mode (0 = CQP, 1 = CRF, 2 = VBR)
+  gint crf;     // Constant Rate Factor (CRF) for quality-based encoding
+  gint rc_type; // Rate Control Type (CQP, ABR, CRF)
+
   gint profile;
   gint preset;
   gint tune;
+
   gboolean closed_gop;
   gint keyint_max;
   gboolean annexb;

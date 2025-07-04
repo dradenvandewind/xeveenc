@@ -164,6 +164,9 @@ enum {
   PROP_BITRATE,
   PROP_QP,
   PROP_HASH,
+  PROP_CRF,
+  PROP_RC_MODE,
+  PROP_INFO_SEI,
   PROP_PROFILE,
   PROP_PRESET,
   PROP_TUNE,
@@ -217,14 +220,13 @@ static void gst_xeve_enc_class_init(GstXeveEncClass *klass) {
 
   g_object_class_install_property(
       gobject_class, PROP_BITRATE,
-      g_param_spec_int("bitrate", "Bitrate", "Target bitrate in kbps", 1,
-                       200000, 2000,
+      g_param_spec_int("bitrate", "Bitrate", "Target bitrate in kbps", 1, 20, 2,
                        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   g_object_class_install_property(
       gobject_class, PROP_QP,
-      g_param_spec_int("qp", "QP", "Quantization Parameter (0 = auto)", 0, 51,
-                       0, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+      g_param_spec_int("qp", "QP", "Quantization Parameter (0 = auto)", 1, 51,
+                       22, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   g_object_class_install_property(
       gobject_class, PROP_HASH,
@@ -232,6 +234,25 @@ static void gst_xeve_enc_class_init(GstXeveEncClass *klass) {
                        "Embed picture signature (HASH) for conformance "
                        "checking in decoding (0 = auto)",
                        0, 1, 0, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+  g_object_class_install_property(
+      gobject_class, PROP_CRF,
+      g_param_spec_int("crf", "CRF",
+                       "Constant Rate Factor for quality-based encoding (0 = "
+                       "auto, 10-49 range)",
+                       10, 49, 12, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+  g_object_class_install_property(
+      gobject_class, PROP_INFO_SEI,
+      g_param_spec_int("info-sei", "Info SEI",
+                       "Embed SEI messages identifying encoder parameters (0 = "
+                       "no, 1 = yes)",
+                       0, 1, 1, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+  g_object_class_install_property(
+      gobject_class, PROP_RC_MODE,
+      g_param_spec_enum("rc-mode", "Rate Control Mode",
+                        "Rate Control Mode (0 = CQP, 1 = ABR, 2 = CRF)",
+                        GST_TYPE_SEARCH_MODE, XEVE_RC_ABR,
+                        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   // Add other properties similarly...
 
@@ -278,13 +299,17 @@ static void gst_xeve_enc_init(GstXeveEnc *self) {
   self->fps_d = 1;
 
   // Default encoder settings
-  self->bitrate = 2000;
-  self->qp = 0;
+  self->bitrate = 2;  // 2000 kbps
+  self->qp = 22;      // Default QP value
+  self->hash = 0;     // Default to no hash
+  self->crf = 12;     // Default to auto
+  self->info_sei = 1; // Default to embedding SEI messages
+
   self->profile = 0;
   self->preset = 2;
   self->tune = 0;
   self->closed_gop = FALSE;
-  self->keyint_max = 250;
+  self->keyint_max = 30;
   self->annexb = TRUE;
 
   // Initialize pointers to NULL before allocation
@@ -333,6 +358,7 @@ static void gst_xeve_enc_set_property(GObject *object, guint prop_id,
   switch (prop_id) {
   case PROP_BITRATE:
     self->bitrate = g_value_get_int(value);
+    self->bitrate = self->bitrate / 1000; // Convert to kbps
     break;
   case PROP_QP:
     self->qp = g_value_get_int(value);
@@ -342,6 +368,39 @@ static void gst_xeve_enc_set_property(GObject *object, guint prop_id,
     if (self->hash < 0 || self->hash > 1) {
       GST_WARNING_OBJECT(self, "Invalid hash value, setting to default (0)");
       self->hash = 0; // Default to no hash
+    }
+    break;
+  case PROP_CRF:
+    self->crf = g_value_get_int(value);
+    if (self->crf < 0 || self->crf > 51) {
+      GST_WARNING_OBJECT(self, "Invalid CRF value, setting to default (0)");
+      self->crf = 12; // Default to auto
+    }
+    break;
+  case PROP_RC_MODE:
+    // Set the rate control mode based on the value
+    switch (g_value_get_enum(value)) {
+    case XEVE_RC_CQP:
+      self->rc_mode = XEVE_RC_CQP;
+      break;
+    case XEVE_RC_ABR:
+      self->rc_mode = XEVE_RC_ABR;
+      break;
+    case XEVE_RC_CRF:
+      self->rc_mode = XEVE_RC_CRF;
+      break;
+    default:
+      GST_WARNING_OBJECT(self, "Invalid RC mode, setting to CQP");
+      self->rc_mode = XEVE_RC_ABR; // Default to CQP
+      break;
+    }
+    break;
+  case PROP_INFO_SEI:
+    self->info_sei = g_value_get_int(value);
+    if (self->info_sei < 0 || self->info_sei > 1) {
+      GST_WARNING_OBJECT(self,
+                         "Invalid info-sei value, setting to default (1)");
+      self->info_sei = 1; // Default to embedding SEI messages
     }
     break;
   // Handle other properties...
@@ -366,6 +425,30 @@ static void gst_xeve_enc_get_property(GObject *object, guint prop_id,
     g_value_set_int(value, self->hash);
     break;
   // Handle other properties...
+  case PROP_CRF:
+    g_value_set_int(value, self->crf);
+    break;
+  case PROP_RC_MODE:
+    // Convert the rate control mode to an enum value
+    switch (self->rc_mode) {
+    case XEVE_RC_CQP:
+      g_value_set_enum(value, XEVE_RC_CQP);
+      break;
+    case XEVE_RC_ABR:
+      g_value_set_enum(value, XEVE_RC_ABR);
+      break;
+    case XEVE_RC_CRF:
+      g_value_set_enum(value, XEVE_RC_CRF);
+      break;
+    default:
+      GST_WARNING_OBJECT(self, "Unknown RC mode, setting to CQP");
+      g_value_set_enum(value, XEVE_RC_CQP); // Default to CQP
+      break;
+    }
+    break;
+  case PROP_INFO_SEI:
+    g_value_set_int(value, self->info_sei);
+    break;
   default:
     G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
     break;
@@ -474,11 +557,11 @@ static gboolean gst_xeve_enc_stop(GstVideoEncoder *encoder) {
   return TRUE;
 }
 
-static int set_extra_config(XEVE id, XEVE_PARAM *param, gint hash) {
+static int set_extra_config(XEVE id, XEVE_PARAM *param, gint hash, gint info) {
   int ret, size;
   // todo to be configure from plugin param
   // embed SEI messages identifying encoder parameters
-  int info = 1;
+
   // embed picture signature (HASH) for conformance checking in decoding"
 
   size = 4;
@@ -555,7 +638,27 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
   // 0; // No B-frames for now to investigate todo conf from input plugin
 
   priv->xeve_cdsc->param.rc_type = XEVE_RC_CQP;
-  priv->xeve_cdsc->param.bitrate = 5; // in kbps
+
+  priv->xeve_cdsc->param.bitrate = self->bitrate; // in kbps
+  priv->xeve_cdsc->param.qp = self->qp;           // Quantization Parameter
+  priv->xeve_cdsc->param.crf =
+      self->crf; // Constant Rate Factor (CRF) for quality-based encoding
+  priv->xeve_cdsc->param.rc_type = self->rc_mode; // Rate Control Mode
+
+  switch (priv->xeve_cdsc->param.rc_type) {
+  case XEVE_RC_CQP:
+    GST_INFO_OBJECT(self, "Rate Control Mode: CQP");
+    break;
+  case XEVE_RC_ABR:
+    GST_INFO_OBJECT(self, "Rate Control Mode: ABR");
+    break;
+  case XEVE_RC_CRF:
+    GST_INFO_OBJECT(self, "Rate Control Mode: CRF");
+    break;
+  default:
+    GST_ERROR_OBJECT(self, "Unknown Rate Control Mode, defaulting to CQP");
+    priv->xeve_cdsc->param.rc_type = XEVE_RC_CQP;
+  }
 
   // Only proceed if xeve_cdsc and its params are valid
   if (priv->xeve_cdsc && priv->xeve_cdsc->param.fps.num != 0) {
@@ -567,11 +670,11 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
       priv->xeve_cdsc->param.vbv_bufsize =
           (int)(buffer_duration_in_seconds *
                 (priv->xeve_cdsc->param.bitrate /
-                 (float)priv->xeve_cdsc->param.fps.num));
+                 ((float)priv->xeve_cdsc->param.fps.num) /
+                 (float)priv->xeve_cdsc->param.fps.den));
     } else if (priv->xeve_cdsc->param.rc_type == XEVE_RC_CQP) {
       // CQP: Fixed bitrate (5kbps example) and 2x buffer
-      priv->xeve_cdsc->param.bitrate =
-          5; // Default bitrate for CQP (adjust if needed)
+      // Default bitrate for CQP (adjust if needed)
       priv->xeve_cdsc->param.vbv_bufsize = priv->xeve_cdsc->param.bitrate * 2;
     }
   } else {
@@ -681,10 +784,6 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
 
   priv->xeve_cdsc->param.rc_type = XEVE_RC_CQP;
 
-  print_xeve_param(&priv->xeve_cdsc->param);
-
-  // XEVE               id = NULL;
-
   priv->xeve_handle = xeve_create(priv->xeve_cdsc, &err);
   if (!priv->xeve_handle) {
     GST_ERROR_OBJECT(self, "cannot create XEVE encoder: %d", err);
@@ -694,8 +793,8 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
     GST_ERROR_OBJECT(self, "Failed to initialize XEVE encoder (err=%d)", err);
     return FALSE;
   }
-  ret =
-      set_extra_config(priv->xeve_handle, &priv->xeve_cdsc->param, self->hash);
+  ret = set_extra_config(priv->xeve_handle, &priv->xeve_cdsc->param, self->hash,
+                         self->info_sei);
   if (ret) {
     GST_ERROR_OBJECT(self, "cannot set extra configurations (ret=%d)", ret);
     // ret = -1; goto ERR;
@@ -1217,7 +1316,9 @@ static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
     GST_ERROR_OBJECT(self, "Failed to convert GstBuffer to XEVE_IMGB");
     return GST_FLOW_ERROR;
   }
+#ifdef INPUT_STRUCT
   display_XEVE_Img(self->imgb_rec);
+#endif
 
   // Debug: write frame to file (remove in production)
   imgb_write("outdump.yuv", self->imgb_rec, priv->xeve_cdsc->param.w,
