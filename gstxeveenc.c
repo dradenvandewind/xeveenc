@@ -163,12 +163,14 @@ enum {
   PROP_0,
   PROP_BITRATE,
   PROP_QP,
+  PROP_HASH,
   PROP_PROFILE,
   PROP_PRESET,
   PROP_TUNE,
   PROP_CLOSED_GOP,
   PROP_KEYINT_MAX,
-  PROP_ANNEXB,
+  PROP_ANNEXB
+
 };
 
 static GstStaticPadTemplate sink_template = GST_STATIC_PAD_TEMPLATE(
@@ -223,6 +225,13 @@ static void gst_xeve_enc_class_init(GstXeveEncClass *klass) {
       gobject_class, PROP_QP,
       g_param_spec_int("qp", "QP", "Quantization Parameter (0 = auto)", 0, 51,
                        0, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+  g_object_class_install_property(
+      gobject_class, PROP_HASH,
+      g_param_spec_int("hash", "HASH",
+                       "Embed picture signature (HASH) for conformance "
+                       "checking in decoding (0 = auto)",
+                       0, 1, 0, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   // Add other properties similarly...
 
@@ -328,6 +337,13 @@ static void gst_xeve_enc_set_property(GObject *object, guint prop_id,
   case PROP_QP:
     self->qp = g_value_get_int(value);
     break;
+  case PROP_HASH:
+    self->hash = g_value_get_int(value);
+    if (self->hash < 0 || self->hash > 1) {
+      GST_WARNING_OBJECT(self, "Invalid hash value, setting to default (0)");
+      self->hash = 0; // Default to no hash
+    }
+    break;
   // Handle other properties...
   default:
     G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
@@ -345,6 +361,9 @@ static void gst_xeve_enc_get_property(GObject *object, guint prop_id,
     break;
   case PROP_QP:
     g_value_set_int(value, self->qp);
+    break;
+  case PROP_HASH:
+    g_value_set_int(value, self->hash);
     break;
   // Handle other properties...
   default:
@@ -455,14 +474,12 @@ static gboolean gst_xeve_enc_stop(GstVideoEncoder *encoder) {
   return TRUE;
 }
 
-static int set_extra_config(XEVE id, XEVE_PARAM *param) {
+static int set_extra_config(XEVE id, XEVE_PARAM *param, gint hash) {
   int ret, size;
   // todo to be configure from plugin param
   // embed SEI messages identifying encoder parameters
   int info = 1;
   // embed picture signature (HASH) for conformance checking in decoding"
-  int hash = 0;
-  // 1;
 
   size = 4;
   ret = xeve_config(id, XEVE_CFG_SET_SEI_CMD, &info, &size);
@@ -648,6 +665,7 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
   }
 
   priv->xeve_cdsc->param.threads = (int)sysconf(_SC_NPROCESSORS_ONLN); // 8;
+  priv->xeve_cdsc->param.profile = XEVE_PROFILE_BASELINE;
 
   // Apply presets
 
@@ -676,7 +694,8 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
     GST_ERROR_OBJECT(self, "Failed to initialize XEVE encoder (err=%d)", err);
     return FALSE;
   }
-  ret = set_extra_config(priv->xeve_handle, &priv->xeve_cdsc->param);
+  ret =
+      set_extra_config(priv->xeve_handle, &priv->xeve_cdsc->param, self->hash);
   if (ret) {
     GST_ERROR_OBJECT(self, "cannot set extra configurations (ret=%d)", ret);
     // ret = -1; goto ERR;
@@ -852,12 +871,9 @@ int gstbuffer_to_xeve_imgb_new(FILE *file, FILE *fileY, FILE *fileU,
                                GstVideoInfo *video_info, XEVE_IMGB *imgb,
                                gint in_chroma_format, gint in_bit_depth) {
   GstMapInfo map, map_Y, map_U, map_V;
-
   guint8 *src_data;
+
   gint width, height;
-  gint y_stride, u_stride, v_stride;
-  gsize y_offset, u_offset, v_offset;
-  gint bytes_per_pixel;
 
   GstBuffer *tmp_gst_buffer;
 
@@ -931,12 +947,6 @@ int gstbuffer_to_xeve_imgb_new(FILE *file, FILE *fileY, FILE *fileU,
   }
 #endif
 
-  bytes_per_pixel = 1;
-
-  // Get plane information from GStreamer
-  y_stride = GST_VIDEO_INFO_PLANE_STRIDE(video_info, 0);
-  y_offset = GST_VIDEO_INFO_PLANE_OFFSET(video_info, 0);
-
   width_chroma = CEIL_RSHIFT(width, shift_h);
   height_chroma = CEIL_RSHIFT(height, shift_v);
 
@@ -965,10 +975,6 @@ int gstbuffer_to_xeve_imgb_new(FILE *file, FILE *fileY, FILE *fileU,
     imgb->s[0] = ALIGN_VAL(width, 16);
     imgb->s[1] = imgb->s[2] = ALIGN_VAL((width_chroma), 16);
 
-    u_stride = GST_VIDEO_INFO_PLANE_STRIDE(video_info, 1);
-    v_stride = GST_VIDEO_INFO_PLANE_STRIDE(video_info, 2);
-    u_offset = GST_VIDEO_INFO_PLANE_OFFSET(video_info, 1);
-    v_offset = GST_VIDEO_INFO_PLANE_OFFSET(video_info, 2);
     break;
 
   default:
@@ -1017,8 +1023,6 @@ int gstbuffer_to_xeve_imgb(GstBuffer *gst_buffer, GstVideoInfo *video_info,
   gsize v_size;
   gint width;
   gint height;
-
-  guint8 *src_data, *dst_data;
 
   gint chroma_format = XEVE_CS_GET_FORMAT(in_chromat_format);
   gint bit_depth = in_bit_depth;
@@ -1182,150 +1186,14 @@ int gstbuffer_to_xeve_imgb(GstBuffer *gst_buffer, GstVideoInfo *video_info,
   return 0;
 }
 
-static int imgb_read_from_gstbuffer(GstBuffer *input_buffer,
-                                    GstVideoInfo *video_info, XEVE_IMGB *imgb,
-                                    int chromat) {
-  unsigned char *p8;
-  int i, j, bd;
-  int cs_w_off, cs_h_off;
-  GstMapInfo map_info;
-  int chroma_format = XEVE_CS_GET_FORMAT(chromat);
-  int bit_depth = XEVE_CS_GET_BIT_DEPTH(chromat);
-  int plane_width, plane_height;
-  gsize plane_offset;
-
-  GST_DEBUG("bit_depth %d bytes", bit_depth);
-
-  bit_depth = 8;
-
-  // Mapper le buffer GStreamer pour lecture
-  if (!gst_buffer_map(input_buffer, &map_info, GST_MAP_READ)) {
-    GST_ERROR("Failed to map GstBuffer for reading");
-    return -1;
-  }
-
-  // Déterminer les paramètres selon la profondeur de bits
-  if (bit_depth == 8) {
-    bd = 1;
-  } else if (bit_depth >= 10 && bit_depth <= 14) {
-    bd = 2;
-  } else {
-    GST_ERROR("Unsupported bit depth: %d", bit_depth);
-    gst_buffer_unmap(input_buffer, &map_info);
-    return -1;
-  }
-
-  // Vérifier la taille totale du buffer
-  GST_DEBUG("Buffer size: %zu bytes, expected for format: %zu bytes",
-            map_info.size, GST_VIDEO_INFO_SIZE(video_info));
-
-  // Copier les données depuis le buffer vers chaque plan de l'image XEVE
-  for (i = 0; i < imgb->np && i < GST_VIDEO_INFO_N_PLANES(video_info); i++) {
-    // Utiliser les informations du GstVideoInfo pour les dimensions et offsets
-    plane_width = GST_VIDEO_INFO_COMP_WIDTH(video_info, i);
-    plane_height = GST_VIDEO_INFO_COMP_HEIGHT(video_info, i);
-    plane_offset = GST_VIDEO_INFO_PLANE_OFFSET(video_info, i);
-
-    GST_DEBUG("Plane %d: width=%d, height=%d, offset=%zu, stride=%d", i,
-              plane_width, plane_height, plane_offset,
-              GST_VIDEO_INFO_PLANE_STRIDE(video_info, i));
-
-    // Vérifier que l'offset ne dépasse pas la taille du buffer
-    if (plane_offset >= map_info.size) {
-      GST_ERROR("Plane %d offset %zu exceeds buffer size %zu", i, plane_offset,
-                map_info.size);
-      gst_buffer_unmap(input_buffer, &map_info);
-      return -1;
-    }
-
-    // Pointer vers le début du plan dans l'image XEVE
-    p8 = (unsigned char *)imgb->a[i] + (imgb->s[i] * imgb->y[i]) +
-         (imgb->x[i] * bd);
-    // p8 = (unsigned char *)imgb->a[i];
-
-    // adresse_base + (ligne * largeur_ligne) + (colonne * taille_pixel)
-
-    GST_DEBUG("Plane %d: imgb->s[i]=%d, imgb->y[i]=%d, imgb->x[i]=%d", i,
-              imgb->s[i], imgb->y[i], imgb->x[i]);
-
-    // Copier ligne par ligne depuis le buffer GStreamer
-    unsigned char *src_line = map_info.data + plane_offset;
-    int src_stride = GST_VIDEO_INFO_PLANE_STRIDE(video_info, i);
-    int copy_width = MIN(plane_width * bd, src_stride);
-
-    for (j = 0; j < plane_height; j++) {
-      // Vérifier que nous ne dépassons pas la fin du buffer
-      if (src_line + copy_width > map_info.data + map_info.size) {
-        GST_ERROR("Would read beyond buffer end at line %d of plane %d", j, i);
-        gst_buffer_unmap(input_buffer, &map_info);
-        return -1;
-      }
-
-      memcpy(p8, src_line, copy_width);
-      src_line +=
-          src_stride;   // Passer à la ligne suivante dans le buffer source
-      p8 += imgb->s[i]; // Passer à la ligne suivante dans l'image XEVE
-    }
-  }
-
-  // Démapper le buffer
-  gst_buffer_unmap(input_buffer, &map_info);
-
-  return 0;
-}
-
-// Version alternative qui utilise gst_video_frame pour une gestion plus simple
-static int imgb_read_from_gstbuffer_frame(GstBuffer *input_buffer,
-                                          GstVideoInfo *video_info,
-                                          XEVE_IMGB *imgb, int chroma) {
-  GstVideoFrame video_frame;
-  unsigned char *p8;
-  int i, j, bd;
-  int bit_depth = XEVE_CS_GET_BIT_DEPTH(chroma);
-
-  // Mapper le buffer comme un frame vidéo
-  if (!gst_video_frame_map(&video_frame, video_info, input_buffer,
-                           GST_MAP_READ)) {
-    GST_ERROR("Failed to map video frame");
-    return -1;
-  }
-
-  // Déterminer la taille des échantillons
-  bd = (bit_depth <= 8) ? 1 : 2;
-
-  // Copier chaque plan
-  for (i = 0; i < imgb->np && i < GST_VIDEO_FRAME_N_PLANES(&video_frame); i++) {
-    int plane_width = GST_VIDEO_FRAME_COMP_WIDTH(&video_frame, i);
-    int plane_height = GST_VIDEO_FRAME_COMP_HEIGHT(&video_frame, i);
-    int src_stride = GST_VIDEO_FRAME_PLANE_STRIDE(&video_frame, i);
-    unsigned char *src_data = GST_VIDEO_FRAME_PLANE_DATA(&video_frame, i);
-
-    // Pointer vers le plan de destination
-    p8 = (unsigned char *)imgb->a[i] + (imgb->s[i] * imgb->y[i]) +
-         (imgb->x[i] * bd);
-
-    GST_DEBUG("Copying plane %d: %dx%d, src_stride=%d, dst_stride=%d", i,
-              plane_width, plane_height, src_stride, imgb->s[i]);
-
-    // Copier ligne par ligne
-    for (j = 0; j < plane_height; j++) {
-      memcpy(p8, src_data + j * src_stride, plane_width * bd);
-      p8 += imgb->s[i];
-    }
-  }
-
-  gst_video_frame_unmap(&video_frame);
-  return 0;
-}
-
 static GstFlowReturn gst_xeve_enc_handle_frame(GstVideoEncoder *encoder,
                                                GstVideoCodecFrame *frame) {
   GstXeveEnc *self = GST_XEVE_ENC(encoder);
   GstXeveEncPrivate *priv = GST_XEVE_ENC_GET_PRIVATE(self);
   GstVideoInfo *info = &priv->input_state->info;
-  XEVE_IMGB img_buf = {0};
+
   XEVE_STAT stat; /* encoding status */
-  XEVE_BITB bit_buf = {0};
+
   GstBuffer *out_buf = NULL;
   GstFlowReturn ret = GST_FLOW_OK;
   gint encoder_return;

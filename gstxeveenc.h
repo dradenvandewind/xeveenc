@@ -66,6 +66,7 @@ struct _GstXeveEnc {
 
   gint bitrate;
   gint qp;
+  gint hash;
   gint profile;
   gint preset;
   gint tune;
