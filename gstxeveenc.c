@@ -167,11 +167,11 @@ enum {
   PROP_CRF,
   PROP_RC_MODE,
   PROP_INFO_SEI,
+  PROP_KEYINT_MAX,
   PROP_PROFILE,
   PROP_PRESET,
   PROP_TUNE,
   PROP_CLOSED_GOP,
-  PROP_KEYINT_MAX,
   PROP_ANNEXB
 
 };
@@ -253,6 +253,22 @@ static void gst_xeve_enc_class_init(GstXeveEncClass *klass) {
                         "Rate Control Mode (0 = CQP, 1 = ABR, 2 = CRF)",
                         GST_TYPE_SEARCH_MODE, XEVE_RC_ABR,
                         G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+  g_object_class_install_property(
+      gobject_class, PROP_KEYINT_MAX,
+      g_param_spec_int("keyint-max", "Keyint Max",
+                       "Maximum interval between I-frames (default 30)", 1, 300,
+                       5, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+  g_object_class_install_property(
+      gobject_class, PROP_PROFILE,
+      g_param_spec_int("profile", "Profile",
+                       "XEVE profile to use (0 = Baseline, 1 = Main)", 0, 1, 0,
+                       G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+  g_object_class_install_property(
+      gobject_class, PROP_PRESET,
+      g_param_spec_int("preset", "Preset",
+                       "XEVE preset to use (0 = Default, 1 = Fast, 2 = medium "
+                       "3 = slow 4 = placebo)",
+                       0, 4, 4, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   // Add other properties similarly...
 
@@ -306,10 +322,10 @@ static void gst_xeve_enc_init(GstXeveEnc *self) {
   self->info_sei = 1; // Default to embedding SEI messages
 
   self->profile = 0;
-  self->preset = 2;
+  self->preset = 1;
   self->tune = 0;
   self->closed_gop = FALSE;
-  self->keyint_max = 30;
+  self->keyint_max = 5;
   self->annexb = TRUE;
 
   // Initialize pointers to NULL before allocation
@@ -403,6 +419,36 @@ static void gst_xeve_enc_set_property(GObject *object, guint prop_id,
       self->info_sei = 1; // Default to embedding SEI messages
     }
     break;
+  case PROP_KEYINT_MAX:
+    self->keyint_max = g_value_get_int(value);
+    if (self->keyint_max < 1 || self->keyint_max > 300) {
+      GST_WARNING_OBJECT(self,
+                         "Invalid keyint-max value, setting to default (30)");
+      self->keyint_max = 5; // Default to 30
+    }
+    break;
+  case PROP_PROFILE:
+    self->profile = g_value_get_int(value);
+    if (self->profile < 0 || self->profile > 1) {
+      GST_WARNING_OBJECT(self, "Invalid profile value, setting to default (0)");
+      self->profile = XEVE_PROFILE_BASELINE; // Default to Baseline profile
+    }
+    break;
+  case PROP_PRESET:
+    self->preset = g_value_get_int(value);
+    if (self->preset < 0 || self->preset > 4) {
+      GST_WARNING_OBJECT(self, "Invalid preset value, setting to default (1)");
+      self->preset = XEVE_PRESET_FAST; // Default to Fast preset
+    }
+    break;
+  case PROP_TUNE:
+    self->tune = g_value_get_int(value);
+    if (self->tune < 0 || self->tune > 3) {
+      GST_WARNING_OBJECT(self, "Invalid tune value, setting to default (0)");
+      self->tune = XEVE_TUNE_NONE; // Default to Default tune
+    }
+    break;
+
   // Handle other properties...
   default:
     G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
@@ -442,18 +488,70 @@ static void gst_xeve_enc_get_property(GObject *object, guint prop_id,
       break;
     default:
       GST_WARNING_OBJECT(self, "Unknown RC mode, setting to CQP");
-      g_value_set_enum(value, XEVE_RC_CQP); // Default to CQP
+      g_value_set_enum(value, XEVE_RC_ABR); // Default to ABR
       break;
     }
     break;
   case PROP_INFO_SEI:
     g_value_set_int(value, self->info_sei);
     break;
-  default:
-    G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
+  case PROP_KEYINT_MAX:
+    g_value_set_int(value, self->keyint_max);
     break;
+  case PROP_PROFILE:
+    switch (self->profile) {
+    case XEVE_PROFILE_BASELINE:
+      g_value_set_int(value, XEVE_PROFILE_BASELINE);
+      break;
+    case XEVE_PROFILE_MAIN:
+      g_value_set_int(value, XEVE_PROFILE_MAIN);
+      break;
+    default:
+      GST_WARNING_OBJECT(self, "Unknown profile, setting to Baseline");
+      g_value_set_int(value,
+                      XEVE_PROFILE_BASELINE); // Default to Baseline profile
+      break;
+    }
+  case PROP_PRESET:
+    // Convert the preset to an integer value
+    switch (self->preset) {
+    case XEVE_PRESET_FAST:
+      g_value_set_int(value, XEVE_PRESET_FAST);
+      break;
+    case XEVE_PRESET_MEDIUM:
+      g_value_set_int(value, XEVE_PRESET_MEDIUM);
+      break;
+    case XEVE_PRESET_SLOW:
+      g_value_set_int(value, XEVE_PRESET_SLOW);
+      break;
+    case XEVE_PRESET_PLACEBO:
+      g_value_set_int(value, XEVE_PRESET_PLACEBO);
+      break;
+    default:
+      GST_WARNING_OBJECT(self, "Unknown preset, setting to Default");
+      g_value_set_int(value, XEVE_PRESET_FAST); // Default to Default preset
+      break;
+    }
+  case PROP_TUNE:
+    // Convert the tune to an integer value
+    switch (self->tune) {
+    case XEVE_TUNE_NONE:
+      g_value_set_int(value, XEVE_TUNE_NONE);
+      break;
+    case XEVE_TUNE_ZEROLATENCY:
+      g_value_set_int(value, XEVE_TUNE_ZEROLATENCY);
+      break;
+    case XEVE_TUNE_PSNR:
+      g_value_set_int(value, XEVE_TUNE_PSNR);
+      break;
+    default:
+      GST_WARNING_OBJECT(self, "Unknown tune, setting to Default");
+      g_value_set_int(value, XEVE_TUNE_NONE); // Default to Default tune
+      break;
+    }
   }
 }
+
 static void gst_xeve_enc_dispose(GObject *object) {
   GstXeveEnc *self = GST_XEVE_ENC(object);
   GstXeveEncPrivate *priv = GST_XEVE_ENC_GET_PRIVATE(self);
@@ -632,18 +730,21 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
   priv->xeve_cdsc->param.h = height;
   priv->xeve_cdsc->param.fps.num = fps_n;
   priv->xeve_cdsc->param.fps.den = fps_d;
-  priv->xeve_cdsc->param.keyint = 5;  // 0: only one I-frame at the first time;
+  priv->xeve_cdsc->param.keyint =
+      self->keyint_max;               // 0: only one I-frame at the first time;
                                       // 1: every frame is coded in I-frame
   priv->xeve_cdsc->param.bframes = 0; // Number of B-frames between I-frames
   // 0; // No B-frames for now to investigate todo conf from input plugin
 
-  priv->xeve_cdsc->param.rc_type = XEVE_RC_CQP;
+  priv->xeve_cdsc->param.rc_type = XEVE_RC_ABR;
 
   priv->xeve_cdsc->param.bitrate = self->bitrate; // in kbps
   priv->xeve_cdsc->param.qp = self->qp;           // Quantization Parameter
   priv->xeve_cdsc->param.crf =
       self->crf; // Constant Rate Factor (CRF) for quality-based encoding
   priv->xeve_cdsc->param.rc_type = self->rc_mode; // Rate Control Mode
+
+  GST_INFO_OBJECT(self, "bitRate %d", priv->xeve_cdsc->param.bitrate);
 
   switch (priv->xeve_cdsc->param.rc_type) {
   case XEVE_RC_CQP:
@@ -656,8 +757,8 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
     GST_INFO_OBJECT(self, "Rate Control Mode: CRF");
     break;
   default:
-    GST_ERROR_OBJECT(self, "Unknown Rate Control Mode, defaulting to CQP");
-    priv->xeve_cdsc->param.rc_type = XEVE_RC_CQP;
+    GST_ERROR_OBJECT(self, "Unknown Rate Control Mode, defaulting to ABR");
+    priv->xeve_cdsc->param.rc_type = XEVE_RC_ABR;
   }
 
   // Only proceed if xeve_cdsc and its params are valid
@@ -672,11 +773,14 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
                 (priv->xeve_cdsc->param.bitrate /
                  ((float)priv->xeve_cdsc->param.fps.num) /
                  (float)priv->xeve_cdsc->param.fps.den));
+
     } else if (priv->xeve_cdsc->param.rc_type == XEVE_RC_CQP) {
       // CQP: Fixed bitrate (5kbps example) and 2x buffer
       // Default bitrate for CQP (adjust if needed)
       priv->xeve_cdsc->param.vbv_bufsize = priv->xeve_cdsc->param.bitrate * 2;
     }
+    GST_INFO_OBJECT(self, "VBV buffer size set to %d",
+                    priv->xeve_cdsc->param.vbv_bufsize);
   } else {
     // Fallback: Handle invalid config (log error + safe defaults)
     fprintf(stderr, "ERROR: Invalid xeve_cdsc or zero fps.num!\n");
@@ -768,12 +872,17 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
   }
 
   priv->xeve_cdsc->param.threads = (int)sysconf(_SC_NPROCESSORS_ONLN); // 8;
-  priv->xeve_cdsc->param.profile = XEVE_PROFILE_BASELINE;
-
+  priv->xeve_cdsc->param.profile = self->profile;
   // Apply presets
-
+#if 0
   ret = xeve_param_ppt(&priv->xeve_cdsc->param, XEVE_PROFILE_BASELINE,
-                       XEVE_PRESET_DEFAULT, XEVE_TUNE_NONE);
+                       XEVE_PRESET_FAST, XEVE_TUNE_ZEROLATENCY);
+#else
+
+  ret = xeve_param_ppt(&priv->xeve_cdsc->param, self->profile, self->preset,
+                       self->tune);
+#endif
+
   if (XEVE_FAILED(ret)) {
     GST_ERROR_OBJECT(self, "cannot set profile, preset, tune to parameter: %d",
                      ret);
@@ -782,7 +891,7 @@ static gboolean gst_xeve_enc_set_format(GstVideoEncoder *encoder,
     // goto ERR;
   }
 
-  priv->xeve_cdsc->param.rc_type = XEVE_RC_CQP;
+  priv->xeve_cdsc->param.rc_type = self->rc_type;
 
   priv->xeve_handle = xeve_create(priv->xeve_cdsc, &err);
   if (!priv->xeve_handle) {
