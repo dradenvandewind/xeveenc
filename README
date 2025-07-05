@@ -19,10 +19,7 @@ ldconfig
 
  nm -D /usr/lib/x86_64-linux-gnu/gstreamer-1.0/gstxeveenc.so | grep gst_plugin_
 
-GST_DEBUG=GST_PLUGIN_LOADING:5,xeveenc:5 gst-inspect-1.0 xeveenc 2>&1 | head -50
-
-gst-inspect-1.0 xeveenc
-Private struct size: 40
+GST_DEBUG=GST_PLUGIN_LOADING:5,xeveenc:5 gst-inspect-1.0 xeveenc 2>&1           
 Factory Details:
   Rank                     primary (256)
   Long-name                XEVE Video Encoder
@@ -57,18 +54,18 @@ Pad Templates:
     Availability: Always
     Capabilities:
       video/x-raw
-                 format: { (string)I420, (string)NV12, (string)YV12 }
-                  width: [ 16, 8192 ]
-                 height: [ 16, 4320 ]
-              framerate: [ 0/1, 300/1 ]
+                 format: { (string)I420, (string)I420_10LE }
+                  width: [ 1, 2147483647 ]
+                 height: [ 1, 2147483647 ]
+              framerate: [ 0/1, 2147483647/1 ]
   
   SRC template: 'src'
     Availability: Always
     Capabilities:
       video/x-xeve
-                  width: [ 16, 8192 ]
-                 height: [ 16, 4320 ]
-              framerate: [ 0/1, 300/1 ]
+                  width: [ 1, 2147483647 ]
+                 height: [ 1, 2147483647 ]
+              framerate: [ 0/1, 2147483647/1 ]
           stream-format: byte-stream
               alignment: au
 
@@ -85,7 +82,23 @@ Element Properties:
 
   bitrate             : Target bitrate in kbps
                         flags: readable, writable
-                        Integer. Range: 1 - 200000 Default: 2000 
+                        Integer. Range: 1 - 20 Default: 2 
+  
+  crf                 : Constant Rate Factor for quality-based encoding (0 = auto, 10-49 range)
+                        flags: readable, writable
+                        Integer. Range: 10 - 49 Default: 12 
+  
+  hash                : Embed picture signature (HASH) for conformance checking in decoding (0 = auto)
+                        flags: readable, writable
+                        Integer. Range: 0 - 1 Default: 0 
+  
+  info-sei            : Embed SEI messages identifying encoder parameters (0 = no, 1 = yes)
+                        flags: readable, writable
+                        Integer. Range: 0 - 1 Default: 1 
+  
+  keyint-max          : Maximum interval between I-frames (default 30)
+                        flags: readable, writable
+                        Integer. Range: 1 - 300 Default: 5 
   
   min-force-key-unit-interval: Minimum interval between force-keyunit requests in nanoseconds
                         flags: readable, writable
@@ -99,13 +112,29 @@ Element Properties:
                         flags: readable, writable
                         Object of type "GstObject"
   
+  preset              : XEVE preset to use (0 = Default, 1 = Fast, 2 = medium 3 = slow 4 = placebo)
+                        flags: readable, writable
+                        Integer. Range: 0 - 4 Default: 0 
+  
+  profile             : XEVE profile to use (0 = Baseline, 1 = Main)
+                        flags: readable, writable
+                        Integer. Range: 0 - 1 Default: 0 
+  
   qos                 : Handle Quality-of-Service events from downstream
                         flags: readable, writable
                         Boolean. Default: false
   
   qp                  : Quantization Parameter (0 = auto)
                         flags: readable, writable
-                        Integer. Range: 0 - 51 Default: 0 
+                        Integer. Range: 1 - 51 Default: 22 
+  
+  rc-mode             : Rate Control Mode (0 = CQP, 1 = ABR, 2 = CRF)
+                        flags: readable, writable
+                        Enum "GstXeveEncRCMode" Default: 0, "cqp"
+                           (0): cqp              - Constant QP
+                           (1): abr              - Average Bitrate
+                           (2): crf              - Constant Rate Factor
+
 
 
 
